@@ -8,7 +8,7 @@ function ensureEnvFile(): void {
   mkdirSync(dirname(ENV_PATH), { recursive: true });
   writeFileSync(
     ENV_PATH,
-    'ADMIN_PASSWORD=hokkaido2020\nGOOGLE_MAPS_API_KEY=\n',
+    'ADMIN_PASSWORD=changeme\nGOOGLE_MAPS_API_KEY=\n',
     "utf-8"
   );
 }

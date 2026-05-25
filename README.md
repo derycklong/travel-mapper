@@ -1,6 +1,6 @@
-# Hokkaido Autumn Road Trip
+# travel-mapper
 
-Interactive travel itinerary web app for a 10-day Hokkaido road trip. Features a public itinerary page with timeline + Leaflet map, and an admin dashboard for managing content.
+Interactive travel itinerary web app with a public timeline + map view, and an admin dashboard for managing content. Supports any trip — add days, activities, locations with photos and ratings from Google Places.
 
 ## Tech Stack
 
@@ -32,19 +32,19 @@ npm install
 Create `data/.env.local`:
 
 ```env
-ADMIN_PASSWORD=hokkaido2020
+ADMIN_PASSWORD=changeme
 GOOGLE_MAPS_API_KEY=your_key_here
 ```
 
 The app auto-creates this file with defaults on first run if it doesn't exist.
 
-### 4. Seed the database
+### 4. Seed the database (optional)
 
 ```bash
 npx tsx scripts/seed.ts
 ```
 
-This populates `data/itinerary.db` with all 10 days and 70+ activities.
+This populates `data/itinerary.db` with sample data. You can skip this and build your itinerary from scratch in the admin panel.
 
 ### 5. Run locally
 
@@ -56,13 +56,14 @@ Open [http://localhost:1337](http://localhost:1337).
 
 ## Admin Access
 
-Navigate to `/admin` and sign in with the password set in `ADMIN_PASSWORD` (default: `hokkaido2020`).
+Navigate to `/admin` and sign in with the password set in `ADMIN_PASSWORD` (default: `changeme`).
 
 From the admin dashboard you can:
 - Add, edit, or delete itinerary days and items
 - Edit coordinates with a live map picker
 - Drag-and-drop reorder days and items
 - Merge duplicate locations
+- Update trip title and subtitle
 - All changes save to SQLite in real time
 
 ## Docker
@@ -70,7 +71,7 @@ From the admin dashboard you can:
 ### Build
 
 ```bash
-docker build -t derycklong/travel-mapper:2026.5.24 .
+docker build -t travel-mapper .
 ```
 
 ### Run
@@ -82,7 +83,7 @@ docker run -d \
   -p 1337:3000 \
   -e TZ=Asia/Singapore \
   -v /path/on/host:/app/data \
-  derycklong/travel-mapper:2026.5.24
+  travel-mapper
 ```
 
 The `-v` volume mount provides persistent storage for the SQLite database and `.env.local` configuration. On first run with an empty volume, the app creates the database and default env file automatically.
@@ -126,8 +127,15 @@ src/
 ├── store/
 │   └── itinerary.ts             # Zustand store (days, selection, theme, filters)
 ├── scripts/
-│   └── seed.ts                  # Seed script for sample data
+│   └── seed.ts                  # Seed script with sample Hokkaido data
 data/
 ├── itinerary.db                 # SQLite database (auto-created, gitignored)
 └── .env.local                   # Environment config (auto-created, gitignored)
 ```
+
+## Customization
+
+- **Trip title & subtitle** — edit from the admin settings page, or change defaults in `src/lib/constants.ts`
+- **Map center & zoom** — change `MAP_DEFAULT_CENTER` and `MAP_DEFAULT_ZOOM` in `src/lib/constants.ts`
+- **Sample data** — modify `scripts/seed.ts` to seed your own itinerary
+- **Activity icons** — add or change SVG paths in `src/components/map/ItineraryMap.tsx` (`getActivitySvg` function)

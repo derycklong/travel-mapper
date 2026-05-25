@@ -63,8 +63,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_locations_name ON locations(name);
 
   -- Default settings if not set
-  INSERT OR IGNORE INTO settings (key, value) VALUES ('trip_title', 'Hokkaido Autumn Road Trip');
-  INSERT OR IGNORE INTO settings (key, value) VALUES ('trip_subtitle', '10 Days in Hokkaido — Sapporo, Lake Toya, Furano, Biei, Sounkyo & Otaru');
+  INSERT OR IGNORE INTO settings (key, value) VALUES ('trip_title', 'My Trip');
+  INSERT OR IGNORE INTO settings (key, value) VALUES ('trip_subtitle', 'Plan your adventure');
 `);
 
 const itemColumns = db
