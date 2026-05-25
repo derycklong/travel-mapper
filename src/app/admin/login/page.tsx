@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Lock, Loader2 } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 export default function AdminLoginPage() {
   const [password, setPassword] = useState("");
@@ -15,16 +14,13 @@ export default function AdminLoginPage() {
     e.preventDefault();
     setError("");
     setIsLoading(true);
-
     try {
       const res = await fetch("/api/admin/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password }),
       });
-
       const data = await res.json();
-
       if (data.success && data.token) {
         localStorage.setItem("admin_token", data.token);
         router.push("/admin");
@@ -39,17 +35,17 @@ export default function AdminLoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[var(--color-muted)] px-4">
+    <div className="min-h-screen flex items-center justify-center px-4" style={{ background: "var(--color-bg)" }}>
       <div className="w-full max-w-sm">
-        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-[var(--color-border)] p-8 shadow-sm">
-          <div className="w-12 h-12 rounded-xl bg-[#4285F4]/10 flex items-center justify-center mx-auto mb-6">
-            <Lock className="w-6 h-6 text-[#4285F4]" />
+        <div style={{ background: "var(--color-card)", border: "1px solid var(--color-border)", borderRadius: "var(--radius-lg)" }} className="p-8">
+          <div className="w-12 h-12 rounded-xl flex items-center justify-center mx-auto mb-6" style={{ background: "var(--color-accent-muted)" }}>
+            <Lock className="w-6 h-6" style={{ color: "var(--color-accent)" }} />
           </div>
 
-          <h1 className="text-xl font-medium text-center mb-1">
+          <h1 className="text-xl font-semibold text-center mb-1" style={{ color: "var(--color-text)" }}>
             Admin Access
           </h1>
-          <p className="text-sm text-[var(--color-muted-foreground)] text-center mb-6">
+          <p className="text-sm text-center mb-6" style={{ color: "var(--color-muted)" }}>
             Enter password to manage itinerary
           </p>
 
@@ -60,28 +56,35 @@ export default function AdminLoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Enter password"
-                className={cn(
-                  "w-full h-11 px-4 rounded-xl border bg-transparent text-sm outline-none transition-colors",
-                  "focus:border-[#4285F4] focus:ring-2 focus:ring-[#4285F4]/20",
-                  error
-                    ? "border-red-300"
-                    : "border-[var(--color-border)]"
-                )}
+                style={{
+                  width: "100%",
+                  height: 44,
+                  padding: "0 16px",
+                  borderRadius: "var(--radius-md)",
+                  background: "transparent",
+                  border: error ? "1px solid #EF4444" : "1px solid var(--color-border)",
+                  color: "var(--color-text)",
+                  fontSize: 14,
+                  outline: "none",
+                }}
                 autoFocus
               />
               {error && (
-                <p className="text-xs text-red-500 mt-1.5 ml-1">{error}</p>
+                <p className="text-xs mt-1.5 ml-1" style={{ color: "#EF4444" }}>{error}</p>
               )}
             </div>
 
             <button
               type="submit"
               disabled={isLoading || !password}
-              className="w-full h-11 bg-[#1a1a1a] text-white rounded-xl text-sm font-medium hover:bg-[#333] disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+              className="w-full h-11 rounded-xl text-sm font-medium transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              style={{
+                background: "var(--color-accent)",
+                color: "white",
+                opacity: isLoading || !password ? 0.5 : 1,
+              }}
             >
-              {isLoading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : null}
+              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
               {isLoading ? "Verifying..." : "Sign In"}
             </button>
           </form>

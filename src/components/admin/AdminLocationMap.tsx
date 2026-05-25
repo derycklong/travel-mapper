@@ -4,60 +4,12 @@ import { useEffect, useRef } from "react";
 import {
   MapContainer,
   Marker,
+  TileLayer,
   useMap,
   useMapEvents,
 } from "react-leaflet";
 import L from "leaflet";
 import type { Location } from "@/lib/types";
-
-// ── Canvas-backed tile layer ──────────────────────────────────────
-// Renders OSM tiles onto a <canvas> with 1 px edge bleed so there
-// are no white seams between adjacent tiles.
-class CanvasTileLayer extends L.GridLayer {
-  private _url: string;
-
-  constructor(options: L.GridLayerOptions & { url: string }) {
-    super(options);
-    this._url = options.url;
-  }
-
-  createTile(coords: L.Coords): HTMLCanvasElement {
-    const size = this.getTileSize();
-    const canvas = document.createElement("canvas");
-    canvas.width = size.x;
-    canvas.height = size.y;
-
-    const ctx = canvas.getContext("2d")!;
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-
-    const url = this._url
-      .replace("{z}", String(coords.z))
-      .replace("{x}", String(coords.x))
-      .replace("{y}", String(coords.y));
-
-    img.onload = () => {
-      // Draw 1 px larger on each side to cover anti-aliasing gaps
-      ctx.drawImage(img, -1, -1, size.x + 2, size.y + 2);
-    };
-    img.onerror = () => {
-      ctx.fillStyle = "#e5e5e5";
-      ctx.fillRect(0, 0, size.x, size.y);
-    };
-    img.src = url;
-    return canvas;
-  }
-}
-
-function CanvasTileLayerComponent({ url }: { url: string }) {
-  const map = useMap();
-  useEffect(() => {
-    const layer = new CanvasTileLayer({ url });
-    layer.addTo(map);
-    return () => { map.removeLayer(layer); };
-  }, [map, url]);
-  return null;
-}
 
 interface AdminLocationMapProps {
   latitude: number;
@@ -182,16 +134,27 @@ export function AdminLocationMap({
   selectedLocationId,
   flyToKey,
 }: AdminLocationMapProps) {
+  // Always use light map background regardless of app theme
+  useEffect(() => {
+    const style = document.createElement("style");
+    style.id = "admin-leaflet-bg";
+    style.textContent = `#admin-map-container .leaflet-container { background: #F0EFEC !important; }`;
+    document.head.appendChild(style);
+    return () => { const el = document.getElementById("admin-leaflet-bg"); if (el) el.remove(); };
+  }, []);
+
   return (
-    <div className="absolute inset-0">
+    <div className="absolute inset-0" id="admin-map-container">
       <MapContainer
         center={[43.2, 142.5]}
         zoom={7}
         style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
+        zoomSnap={1}
+        zoomDelta={1}
         zoomControl={false}
         attributionControl={false}
       >
-        <CanvasTileLayerComponent url="/api/map-tiles/light/{z}/{x}/{y}?v=osm-2" />
+        <TileLayer url="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png" tileSize={256} />
 
         <MapController
           latitude={latitude}

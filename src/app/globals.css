@@ -1,31 +1,57 @@
 @import "tailwindcss";
 @import "leaflet/dist/leaflet.css";
 
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 @theme inline {
-  --color-background: #ffffff;
-  --color-foreground: #171717;
-  --color-accent: #4285F4;
-  --color-card: #f8f8f8;
-  --color-border: #e5e5e5;
-  --color-muted: #f5f5f5;
-  --color-muted-foreground: #737373;
-  --font-sans: 'Google Sans', 'Roboto', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: ui-monospace, monospace;
+  --color-bg: #FAFAF8;
+  --color-panel: rgba(255,255,255,0.72);
+  --color-card: #FFFFFF;
+  --color-border: rgba(0,0,0,0.06);
+  --color-text: #111111;
+  --color-muted: #6B7280;
+  --color-accent: #2563EB;
+  --color-accent-muted: rgba(37,99,235,0.08);
+  --color-accent-ring: rgba(37,99,235,0.25);
+
+  --color-food: #EA580C;
+  --color-nature: #16A34A;
+  --color-hotel: #4338CA;
+  --color-transit: #6B7280;
+  --color-shopping: #DB2777;
+  --color-water: #0891B2;
+  --color-onsen: #7C3AED;
+  --color-cafe: #D97706;
+  --color-default: #525252;
+
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
   --radius-xl: 24px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-background: #121212;
-    --color-foreground: #ededed;
-    --color-card: #1e1e1e;
-    --color-border: #2e2e2e;
-    --color-muted: #1a1a1a;
-    --color-muted-foreground: #9ca3af;
-  }
+:root[data-theme="dark"] {
+  --color-bg: #0F1115;
+  --color-panel: rgba(20,20,24,0.68);
+  --color-card: #181A20;
+  --color-border: rgba(255,255,255,0.06);
+  --color-text: #F3F4F6;
+  --color-muted: #9CA3AF;
+  --color-accent: #60A5FA;
+  --color-accent-muted: rgba(96,165,250,0.12);
+  --color-accent-ring: rgba(96,165,250,0.3);
+
+  --color-food: #FB923C;
+  --color-nature: #4ADE80;
+  --color-hotel: #818CF8;
+  --color-transit: #9CA3AF;
+  --color-shopping: #F472B6;
+  --color-water: #22D3EE;
+  --color-onsen: #A78BFA;
+  --color-cafe: #FBBF24;
+  --color-default: #A3A3A3;
 }
 
 * {
@@ -38,99 +64,120 @@ html, body {
   overflow: hidden;
   margin: 0;
   padding: 0;
-  scroll-behavior: smooth;
-}
-
-body {
-  background: var(--color-background);
-  color: var(--color-foreground);
-  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-input,
-select,
-textarea {
-  background: #ffffff;
-  color: #171717;
-  border-color: #d1d5db;
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+}
+
+input, select, textarea {
+  background: var(--color-card);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+input:focus, select:focus, textarea:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-ring);
 }
 
 select option {
-  background: #ffffff;
-  color: #171717;
+  background: var(--color-card);
+  color: var(--color-text);
 }
 
-@media (prefers-color-scheme: dark) {
-  input,
-  select,
-  textarea,
-  select option {
-    background: #111827;
-    color: #f9fafb;
-    border-color: #374151;
-  }
-}
-
-/* Leaflet popup customizations */
+/* Leaflet overrides */
 .leaflet-popup-content-wrapper {
-  border-radius: 12px !important;
-  box-shadow: 0 2px 16px rgba(0,0,0,0.12) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.1) !important;
+  padding: 0 !important;
+  overflow: hidden;
 }
+
 .leaflet-popup-content {
-  font-family: inherit !important;
-  margin: 10px 14px !important;
-  max-width: 80vw !important;
+  font-family: var(--font-sans) !important;
+  margin: 0 !important;
+  min-width: 240px;
+  max-width: 300px;
 }
 
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: #d0d0d0;
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #b0b0b0;
+.leaflet-popup-tip {
+  box-shadow: none !important;
 }
 
-/* Card hover effect */
-.itinerary-card {
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+:root[data-theme="dark"] .leaflet-popup-content-wrapper {
+  background: var(--color-card) !important;
+  color: var(--color-text) !important;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.4) !important;
 }
-.itinerary-card:hover {
-  transform: translateX(4px);
-  box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+
+:root[data-theme="dark"] .leaflet-popup-tip {
+  background: var(--color-card) !important;
+}
+
+:root[data-theme="dark"] .leaflet-popup-close-button {
+  color: var(--color-muted) !important;
 }
 
 .leaflet-container {
-  background: #f0f0f0;
+  background: var(--color-bg);
+  image-rendering: auto;
 }
 
+.leaflet-container img.leaflet-tile,
+.leaflet-container canvas.leaflet-tile {
+  mix-blend-mode: normal;
+}
 
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
 
-/* Hide scrollbar while keeping scroll */
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 2px;
+}
+
+/* Hide scrollbar utility */
 .hide-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
 .hide-scrollbar::-webkit-scrollbar {
   display: none;
 }
 
-/* Loading shimmer animation */
+/* Marker bounce */
+@keyframes bounce {
+  0% { transform: scale(0.6); opacity: 0; }
+  60% { transform: scale(1.1); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* Shimmer loading */
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
+
 .skeleton {
-  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background: linear-gradient(90deg, var(--color-card) 25%, var(--color-border) 50%, var(--color-card) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
 }

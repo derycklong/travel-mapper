@@ -46,6 +46,8 @@ export type CategoryIcon =
   | "museum"
   | "park"
   | "water"
+  | "transit"
+  | "nature"
   | "default";
 
 export interface ItineraryItemWithDay extends ItineraryItem {

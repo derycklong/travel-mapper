@@ -12,13 +12,19 @@ import {
 } from "react-leaflet";
 import L from "leaflet";
 import { useItineraryStore } from "@/store/itinerary";
-import { getDayColor, getActivityIcon } from "@/lib/utils";
+import { getDayColor, getActivityIcon, getCategoryAccent } from "@/lib/utils";
 import { Moon, Sun, Maximize2, LocateFixed } from "lucide-react";
 import { toast } from "sonner";
 import type { ItineraryItem } from "@/lib/types";
 
-// Fix default Leaflet marker icon paths — use local copies from public/leaflet/
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function isValidLatLng(v: unknown): v is number {
+  return typeof v === "number" && isFinite(v);
+}
+
+function hasLocation(item: ItineraryItem): boolean {
+  return !!item.location_id && isValidLatLng(item.latitude) && isValidLatLng(item.longitude);
+}
+
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: "/leaflet/marker-icon-2x.png",
@@ -45,59 +51,67 @@ function getActivitySvg(category: string): string {
   return icons[category] || icons.default;
 }
 
-function createIconMarker(color: string, isSelected: boolean, count: number, svgPath: string) {
-  const size = isSelected ? 30 : count > 1 ? 26 : 22;
-  const iconSize = count > 1 ? 14 : 12;
+function createIconMarker(color: string, accent: string, isSelected: boolean, sequenceBadges: number[] | undefined, svgPath: string) {
+  const outer = isSelected ? 44 : 36;
+  const inner = isSelected ? 30 : 24;
+  const iconSize = 16;
+  const ringWidth = 3;
+  const shadow = isSelected
+    ? `0 0 0 4px ${accent}22, 0 2px 8px rgba(0,0,0,0.15)`
+    : `0 2px 6px rgba(0,0,0,0.12)`;
+  const animation = isSelected ? "animation:bounce 0.4s cubic-bezier(0.34,1.56,0.64,1);" : "";
+
+  const badges = sequenceBadges?.length
+    ? sequenceBadges.map((seq, i) =>
+        `<span style="position:absolute;top:${i * 16}px;right:-2px;background:var(--color-accent, #2563EB);color:white;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;box-shadow:0 1px 4px rgba(0,0,0,0.2);z-index:${sequenceBadges.length - i};">${seq}</span>`
+      ).join("")
+    : "";
+
   return L.divIcon({
     html: `<div style="
-      width:${size}px;height:${size}px;background:${color};
-      border-radius:50%;border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.3);
+      position:relative;
+      width:${outer}px;height:${outer}px;
       display:flex;align-items:center;justify-content:center;
-      transform:${isSelected ? "scale(1.3)" : "scale(1)"};
-      transition:transform 0.2s;
-    "><svg width="${iconSize}" height="${iconSize}" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${svgPath}</svg>${count > 1 ? `<span style="position:absolute;bottom:-6px;right:-6px;background:white;color:${color};border-radius:50%;width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,0.3);">${count}</span>` : ""}</div>`,
+      ${animation}
+    ">
+      <div style="
+        width:${inner}px;height:${inner}px;
+        border-radius:50%;
+        background:${color};
+        border:${ringWidth}px solid white;
+        box-shadow:${shadow};
+        display:flex;align-items:center;justify-content:center;
+        transition:transform 0.2s;
+      ">
+        <svg width="${iconSize}" height="${iconSize}" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${svgPath}</svg>
+      </div>
+      ${badges}
+    </div>`,
     className: "",
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
+    iconSize: [outer, outer],
+    iconAnchor: [outer / 2, outer / 2],
   });
 }
 
-// Cooldown after a marker tap so the map click handler
-// doesn't immediately close the popup on iOS.
 let lastMarkerTap = 0;
 
 function findNearestItem(
-  latlng: L.LatLng,
-  map: L.Map,
-  items: ItineraryItem[],
+  latlng: L.LatLng, map: L.Map, items: ItineraryItem[],
 ): ItineraryItem | null {
   let best: ItineraryItem | null = null;
   let bestDist = Infinity;
   const tapPoint = map.latLngToContainerPoint(latlng);
-
   for (const item of items) {
-    const markerPoint = map.latLngToContainerPoint([
-      item.latitude,
-      item.longitude,
-    ]);
+    if (!isValidLatLng(item.latitude) || !isValidLatLng(item.longitude)) continue;
+    const markerPoint = map.latLngToContainerPoint([item.latitude, item.longitude]);
     const d = tapPoint.distanceTo(markerPoint);
-    if (d < bestDist) {
-      bestDist = d;
-      best = item;
-    }
+    if (d < bestDist) { bestDist = d; best = item; }
   }
-
-  return bestDist <= 36 ? best : null;
+  return bestDist <= 44 ? best : null;
 }
 
 function MapController({
-  selectedItemId,
-  allItems,
-  fitBoundsFlag,
-  onMapClick,
-  onMarkerTap,
-  userLocation,
-  userLocationFocusRequest,
+  selectedItemId, allItems, fitBoundsFlag, onMapClick, onMarkerTap, userLocation, userLocationFocusRequest,
 }: {
   selectedItemId: string | null;
   allItems: ItineraryItem[];
@@ -114,31 +128,18 @@ function MapController({
   useEffect(() => {
     const container = map.getContainer();
     let disposed = false;
-
     const refreshMapSize = () => {
       requestAnimationFrame(() => {
-        if (disposed || !container.isConnected || !map.getPane("mapPane")) {
-          return;
-        }
-
-        try {
-          map.invalidateSize({ pan: false });
-        } catch {
-          // Leaflet can briefly remove its map pane during mobile dev reloads.
-        }
+        if (disposed || !container.isConnected || !map.getPane("mapPane")) return;
+        try { map.invalidateSize({ pan: false }); } catch {}
       });
     };
-
-    const observer = new ResizeObserver(() => {
-      refreshMapSize();
-    });
+    const observer = new ResizeObserver(() => refreshMapSize());
     observer.observe(container);
-
     refreshMapSize();
     const settleTimer = window.setTimeout(refreshMapSize, 300);
     window.addEventListener("orientationchange", refreshMapSize);
     window.addEventListener("resize", refreshMapSize);
-
     return () => {
       disposed = true;
       observer.disconnect();
@@ -148,28 +149,20 @@ function MapController({
     };
   }, [map]);
 
-  // Close popup on map background click (not on markers)
   useEffect(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handler = (e: any) => {
-      if (Date.now() - lastMarkerTap < 400) return;
-
-      const oe = e.originalEvent;
-      const target =
-        (oe?.target as HTMLElement | undefined) ??
-        (oe?.changedTouches?.[0]?.target as HTMLElement | undefined);
-      if (target?.closest(".leaflet-popup")) return;
-
-      // On iOS the marker click sometimes doesn't fire at all —
-      // fall back to proximity check against marker coordinates.
-      const nearest = findNearestItem(e.latlng, map, allItems);
-      if (nearest) {
-        lastMarkerTap = Date.now();
-        onMarkerTap(nearest);
-        return;
+      try {
+        if (Date.now() - lastMarkerTap < 400) return;
+        if (!e.latlng || !isFinite(e.latlng.lat) || !isFinite(e.latlng.lng)) return;
+        const oe = e.originalEvent;
+        const target = (oe?.target as HTMLElement | undefined) ?? (oe?.changedTouches?.[0]?.target as HTMLElement | undefined);
+        if (target?.closest(".leaflet-popup")) return;
+        const nearest = findNearestItem(e.latlng, map, allItems);
+        if (nearest) { lastMarkerTap = Date.now(); onMarkerTap(nearest); return; }
+        onMapClick();
+      } catch (err) {
+        console.error("[Map] click handler error:", err);
       }
-
-      onMapClick();
     };
     map.on("click", handler);
     return () => { map.off("click", handler); };
@@ -178,58 +171,31 @@ function MapController({
   useEffect(() => {
     const container = map.getContainer();
     let startPoint: L.Point | null = null;
-
     const getTouchPoint = (event: TouchEvent | PointerEvent) => {
-      const touch =
-        "changedTouches" in event ? event.changedTouches[0] : event;
+      const touch = "changedTouches" in event ? event.changedTouches[0] : event;
       if (!touch) return null;
-
       const rect = container.getBoundingClientRect();
       return L.point(touch.clientX - rect.left, touch.clientY - rect.top);
     };
-
-    const handleTouchStart = (event: TouchEvent | PointerEvent) => {
-      startPoint = getTouchPoint(event);
-    };
-
+    const handleTouchStart = (event: TouchEvent | PointerEvent) => { startPoint = getTouchPoint(event); };
     const handleTouchEnd = (event: TouchEvent | PointerEvent) => {
       if (Date.now() - lastMarkerTap < 400) return;
-
       const target = event.target as HTMLElement | null;
       if (target?.closest(".leaflet-popup, button, a")) return;
-
       const endPoint = getTouchPoint(event);
-      if (!startPoint || !endPoint || startPoint.distanceTo(endPoint) > 12) {
-        startPoint = null;
-        return;
-      }
+      if (!startPoint || !endPoint || startPoint.distanceTo(endPoint) > 12) { startPoint = null; return; }
       startPoint = null;
-
-      const nearest = findNearestItem(
-        map.containerPointToLatLng(endPoint),
-        map,
-        allItems
-      );
-
+      const nearest = findNearestItem(map.containerPointToLatLng(endPoint), map, allItems);
       if (!nearest) return;
-
       event.preventDefault();
       event.stopPropagation();
       lastMarkerTap = Date.now();
       onMarkerTap(nearest);
     };
-
-    container.addEventListener("touchstart", handleTouchStart, {
-      capture: true,
-      passive: true,
-    });
-    container.addEventListener("touchend", handleTouchEnd, {
-      capture: true,
-      passive: false,
-    });
+    container.addEventListener("touchstart", handleTouchStart, { capture: true, passive: true });
+    container.addEventListener("touchend", handleTouchEnd, { capture: true, passive: false });
     container.addEventListener("pointerdown", handleTouchStart, true);
     container.addEventListener("pointerup", handleTouchEnd, true);
-
     return () => {
       container.removeEventListener("touchstart", handleTouchStart, true);
       container.removeEventListener("touchend", handleTouchEnd, true);
@@ -239,51 +205,59 @@ function MapController({
   }, [allItems, map, onMarkerTap]);
 
   useEffect(() => {
-    // Close popup on drag but NOT on zoom — programmatic flyTo
-    // fires zoomstart synchronously on iOS, which would close the popup
-    // before it even renders.
     map.on("dragstart", onMapClick);
     return () => { map.off("dragstart", onMapClick); };
   }, [map, onMapClick]);
 
-  // Fit bounds on first load
-  useEffect(() => {
-    if (hasFitInitial.current || allItems.length === 0) return;
-    hasFitInitial.current = true;
-    const bounds = L.latLngBounds(
-      allItems.map((i) => [i.latitude, i.longitude] as [number, number])
-    );
-    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 9 });
-  }, [allItems, map]);
+  const validItems = useMemo(() => allItems.filter((i) => hasLocation(i)), [allItems]);
 
-  // Fit bounds when flag changes
+  useEffect(() => {
+    if (hasFitInitial.current || validItems.length === 0) return;
+    hasFitInitial.current = true;
+    try {
+      const bounds = L.latLngBounds(validItems.map((i) => [i.latitude, i.longitude] as [number, number]));
+      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 9 });
+    } catch (err) {
+      console.error("[Map] initial fitBounds error:", err);
+    }
+  }, [validItems, map]);
+
   useEffect(() => {
     if (fitBoundsFlag === 0 || allItems.length === 0) return;
-    const bounds = L.latLngBounds(
-      allItems.map((i) => [i.latitude, i.longitude] as [number, number])
-    );
-    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 9 });
-  }, [fitBoundsFlag]); // eslint-disable-line react-hooks/exhaustive-deps
+    try {
+      const bounds = L.latLngBounds(allItems
+        .filter((i) => isValidLatLng(i.latitude) && isValidLatLng(i.longitude))
+        .map((i) => [i.latitude, i.longitude] as [number, number]));
+      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+    } catch (err) {
+      console.error("[Map] fitBounds error:", err);
+    }
+  }, [fitBoundsFlag, allItems, map]);
 
-  // Fly to selected item
   useEffect(() => {
     if (!selectedItemId || selectedItemId === prevSelected.current) {
       prevSelected.current = selectedItemId;
       return;
     }
     prevSelected.current = selectedItemId;
-
     const item = allItems.find((i) => i.id === selectedItemId);
     if (!item) return;
-
-    map.flyTo([item.latitude, item.longitude], 13, { duration: 0.8 });
+    if (!hasLocation(item)) return;
+    // On mobile, delay to let Vaul drawer close animation finish before centering
+    const delay = window.innerWidth < 1024 ? 300 : 0;
+    const timer = setTimeout(() => {
+      try {
+        map.invalidateSize({ pan: false });
+        map.flyTo([item.latitude, item.longitude], 16, { duration: 1 });
+      } catch {}
+    }, delay);
+    return () => { clearTimeout(timer); };
   }, [selectedItemId, allItems, map]);
 
   useEffect(() => {
     if (userLocationFocusRequest === 0 || !userLocation) return;
-    map.flyTo([userLocation.latitude, userLocation.longitude], 15, {
-      duration: 0.6,
-    });
+    if (!isValidLatLng(userLocation.latitude) || !isValidLatLng(userLocation.longitude)) return;
+    map.setView([userLocation.latitude, userLocation.longitude], 15);
   }, [map, userLocation, userLocationFocusRequest]);
 
   return null;
@@ -295,26 +269,18 @@ interface PlaceDetails {
   rating: number | null;
   totalRatings: number | null;
   photos: string[];
-  reviews: { authorName: string; rating: number; text: string; relativeTime: string }[];
   url: string | null;
   website: string | null;
 }
 
-function StarRating({ rating }: { rating: number }) {
-  const stars = Math.round(rating);
-  return (
-    <span style={{ color: "#FBBC04", fontSize: 11, letterSpacing: 1 }}>
-      {"★".repeat(stars)}{"☆".repeat(5 - stars)}
-    </span>
-  );
-}
-
-function PlacePopupContent({ popupItem, displayDayIndex, item, group, onSelectItem }: {
+function PlacePopupContent({ popupItem, displayDayIndex, item, group, allItems, onNextStop, onPrevStop }: {
   popupItem: ItineraryItem;
   displayDayIndex: number;
   item: ItineraryItem;
   group: { items: ItineraryItem[] };
-  onSelectItem: (id: string) => void;
+  allItems: ItineraryItem[];
+  onNextStop: (item: ItineraryItem) => void;
+  onPrevStop: (item: ItineraryItem) => void;
 }) {
   const [place, setPlace] = useState<PlaceDetails | null>(null);
   const [loading, setLoading] = useState(false);
@@ -326,179 +292,233 @@ function PlacePopupContent({ popupItem, displayDayIndex, item, group, onSelectIt
     if (!query || fetchedRef.current === query) return;
     fetchedRef.current = query;
     setLoading(true);
-    fetch(`/api/place-details?q=${encodeURIComponent(query)}`)
+    const params = new URLSearchParams({ q: query, itemId: popupItem.id });
+    if (popupItem.latitude && popupItem.longitude) {
+      params.set("lat", String(popupItem.latitude));
+      params.set("lng", String(popupItem.longitude));
+    }
+    fetch(`/api/place-details?${params}`)
       .then((r) => r.json())
-      .then((data) => {
-        if (data.place) setPlace(data.place);
-      })
-      .catch(() => {})
+      .then((data) => { if (data.place) setPlace(data.place); })
       .finally(() => setLoading(false));
-  }, [popupItem.location_name]);
+  }, [popupItem.location_name, popupItem.id]);
+
+  const iconType = getActivityIcon(popupItem.activity, popupItem.location_name);
+  const accent = getCategoryAccent(iconType);
 
   return (
-    <div style={{ fontFamily: "inherit", minWidth: 220, maxWidth: 280, fontSize: 12 }}>
-      {/* Photo */}
+    <div style={{ fontFamily: "inherit", minWidth: 220, maxWidth: 300, fontSize: 13, lineHeight: 1.4 }}>
+      {/* Photo with gradient overlay */}
       {place?.photos?.length ? (
-        <div style={{ position: "relative", margin: "-12px -12px 8px", borderRadius: "8px 8px 0 0", overflow: "hidden", background: "#f5f5f5", height: 140 }}>
+        <div style={{ position: "relative", height: 140, overflow: "hidden", background: "var(--color-card)" }}>
           <img
             src={`/api/place-photo/${place.photos[photoIndex]}`}
             alt=""
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
           />
+          <div style={{
+            position: "absolute", bottom: 0, left: 0, right: 0, height: "50%",
+            background: "linear-gradient(transparent, rgba(0,0,0,0.5))",
+          }} />
+          {/* Dot navigation */}
           {place.photos.length > 1 && (
-            <div style={{ position: "absolute", bottom: 6, right: 6, display: "flex", gap: 4 }}>
+            <div style={{ position: "absolute", bottom: 8, right: 8, display: "flex", gap: 5 }}>
               {place.photos.map((_, i) => (
                 <button
                   key={i}
-                  onClick={() => setPhotoIndex(i)}
+                  onClick={(e) => { e.stopPropagation(); setPhotoIndex(i); }}
                   style={{
-                    width: 8, height: 8, borderRadius: "50%", border: "none",
-                    background: i === photoIndex ? "white" : "rgba(255,255,255,0.5)",
-                    cursor: "pointer", padding: 0,
+                    width: 10, height: 10, borderRadius: "50%", border: "none",
+                    background: i === photoIndex ? "white" : "rgba(255,255,255,0.4)",
+                    cursor: "pointer", padding: 0, transition: "background 0.15s",
                   }}
                 />
               ))}
             </div>
           )}
+          {/* Prev/next arrows */}
+          {place.photos.length > 1 && (
+            <>
+              {photoIndex > 0 && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setPhotoIndex(photoIndex - 1); }}
+                  style={{
+                    position: "absolute", left: 4, top: "50%", transform: "translateY(-50%)",
+                    width: 24, height: 24, borderRadius: "50%", border: "none",
+                    background: "rgba(255,255,255,0.7)", cursor: "pointer", padding: 0,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 14, lineHeight: 1, color: "#333",
+                  }}
+                >‹</button>
+              )}
+              {photoIndex < place.photos.length - 1 && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setPhotoIndex(photoIndex + 1); }}
+                  style={{
+                    position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)",
+                    width: 24, height: 24, borderRadius: "50%", border: "none",
+                    background: "rgba(255,255,255,0.7)", cursor: "pointer", padding: 0,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 14, lineHeight: 1, color: "#333",
+                  }}
+                >›</button>
+              )}
+            </>
+          )}
         </div>
-      ) : null}
-
-      {/* Rating */}
-      {place?.rating ? (
-        <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 4 }}>
-          <StarRating rating={place.rating} />
-          <span style={{ fontSize: 10, color: "#888" }}>
-            {place.rating.toFixed(1)}
-            {place.totalRatings ? ` (${place.totalRatings})` : ""}
-          </span>
+      ) : (
+        <div style={{ height: 80, background: "var(--color-card)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "var(--color-muted)" }}>
+          {loading ? "Loading…" : "No photo available"}
         </div>
-      ) : null}
-
-      {/* Day & Activity */}
-      <p style={{ fontSize: 10, color: "#888", margin: "0 0 2px" }}>
-        Day {displayDayIndex + 1}
-      </p>
-      <p style={{ fontWeight: 500, margin: "0 0 2px", lineHeight: 1.3 }}>
-        {popupItem.activity}
-      </p>
-      <p style={{ color: "#666", margin: "0 0 4px", lineHeight: 1.3 }}>
-        {popupItem.location_name}
-      </p>
-
-      {/* Address */}
-      {place?.address && place.address !== popupItem.location_name && (
-        <p style={{ fontSize: 10, color: "#999", margin: "0 0 6px", lineHeight: 1.3 }}>
-          {place.address}
-        </p>
       )}
 
-      {/* Links */}
-      <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-        <a
-          href={place?.url || `https://www.google.com/maps?q=${item.latitude},${item.longitude}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ fontSize: 10, color: "#4285F4", textDecoration: "none" }}
-        >
-          Open in Maps
-        </a>
-        {place?.website && (
-          <a
-            href={place.website}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ fontSize: 10, color: "#4285F4", textDecoration: "none" }}
-          >
-            Website
-          </a>
+      {/* Content */}
+      <div style={{ padding: "10px 14px 12px" }}>
+        {/* Rating */}
+        {place?.rating ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 6 }}>
+            <span style={{ color: "#EAB308", fontSize: 13, letterSpacing: 1 }}>
+              {"★".repeat(Math.round(place.rating))}{"☆".repeat(5 - Math.round(place.rating))}
+            </span>
+            <span style={{ fontSize: 11, color: "var(--color-muted)" }}>
+              {place.rating.toFixed(1)}
+              {place.totalRatings ? ` (${place.totalRatings})` : ""}
+            </span>
+          </div>
+        ) : null}
+
+        {/* Day label */}
+        <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", color: getDayColor(displayDayIndex), marginBottom: 2, display: "block" }}>
+          Day {displayDayIndex + 1}
+        </span>
+
+        {/* Activity title */}
+        <p style={{ fontWeight: 600, margin: "0 0 2px", fontSize: 14, color: "var(--color-text)" }}>
+          {popupItem.activity}
+        </p>
+
+        {/* Location */}
+        <p style={{ color: "var(--color-muted)", margin: "0 0 4px", fontSize: 12 }}>
+          {popupItem.location_name}
+        </p>
+
+        {/* Address */}
+        {place?.address && place.address !== popupItem.location_name && (
+          <p style={{ fontSize: 11, color: "var(--color-muted)", margin: "0 0 8px", opacity: 0.7 }}>
+            {place.address}
+          </p>
         )}
+
+        {/* Links */}
+        <div style={{ display: "flex", gap: 12, marginTop: 6 }}>
+          <a
+            href={place?.url || `https://www.google.com/maps?q=${item.latitude},${item.longitude}`}
+            target="_blank" rel="noopener noreferrer"
+            style={{ fontSize: 11, fontWeight: 500, color: "var(--color-accent)", textDecoration: "none" }}
+          >
+            Google Maps
+          </a>
+          {place?.website && (
+            <a
+              href={place.website} target="_blank" rel="noopener noreferrer"
+              style={{ fontSize: 11, fontWeight: 500, color: "var(--color-accent)", textDecoration: "none" }}
+            >
+              Website
+            </a>
+          )}
+        </div>
+
+        {group.items.length > 1 && (
+          <p style={{ fontSize: 11, color: "var(--color-accent)", margin: "6px 0 0", fontWeight: 500 }}>
+            +{group.items.length - 1} more stops
+          </p>
+        )}
+
+        {/* Prev / Next stop */}
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <button
+            onClick={(e) => { e.stopPropagation(); onPrevStop(popupItem); }}
+            style={{
+              flex: 1, padding: "6px 0", borderRadius: 8, border: "1px solid var(--color-border)",
+              background: "transparent", color: "var(--color-text)", fontSize: 12, fontWeight: 500, cursor: "pointer",
+            }}
+          >
+            ← Previous Stop
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onNextStop(popupItem); }}
+            style={{
+              flex: 1, padding: "6px 0", borderRadius: 8, border: "1px solid var(--color-border)",
+              background: "transparent", color: "var(--color-text)", fontSize: 12, fontWeight: 500, cursor: "pointer",
+            }}
+          >
+            Next Stop →
+          </button>
+        </div>
       </div>
-
-      {group.items.length > 1 && (
-        <p style={{ fontSize: 10, color: "#4285F4", margin: "4px 0 0" }}>
-          +{group.items.length - 1} more stops
-        </p>
-      )}
-
-      {loading && (
-        <p style={{ fontSize: 9, color: "#ccc", margin: "4px 0 0" }}>Loading details…</p>
-      )}
     </div>
   );
 }
 
 function ItineraryMarker({
-  group,
-  selectedItemId,
-  hoveredItemId,
-  poppedKey,
-  onPopupChange,
-  onSelectItem,
-  onHoverItem,
+  group, selectedItemId, hoveredItemId, onPopupChange, onSelectItem, onHoverItem, allItems, onNextStop, onPrevStop,
 }: {
   group: { items: ItineraryItem[]; dayIndex: number };
   selectedItemId: string | null;
   hoveredItemId: string | null;
-  poppedKey: string | null;
   onPopupChange: (key: string | null) => void;
   onSelectItem: (id: string) => void;
   onHoverItem: (id: string | null) => void;
+  allItems: ItineraryItem[];
+  onNextStop: (item: ItineraryItem) => void;
+  onPrevStop: (item: ItineraryItem) => void;
 }) {
   const markerRef = useRef<L.Marker | null>(null);
   const item = group.items[0];
   const locKey = `${item.latitude}-${item.longitude}`;
   const isSelected = group.items.some((i) => i.id === selectedItemId);
   const isHovered = group.items.some((i) => i.id === hoveredItemId);
-  const isPopped = poppedKey === locKey;
-  const popupItem =
-    group.items.find((groupItem) => groupItem.id === selectedItemId) || item;
+  const popupItem = group.items.find((groupItem) => groupItem.id === selectedItemId) || item;
   const days = useItineraryStore((s) => s.days);
+  const activeDayFilter = useItineraryStore((s) => s.activeDayFilter);
   const popupDayIndex = days.findIndex((d) => d.id === popupItem.day_id);
   const displayDayIndex = popupDayIndex >= 0 ? popupDayIndex : group.dayIndex;
   const color = getDayColor(displayDayIndex);
-  const svgPath = getActivitySvg(getActivityIcon(item.activity, item.location_name));
-  const icon = createIconMarker(
-    color,
-    isSelected || isHovered,
-    group.items.length,
-    svgPath
-  );
+  const iconType = getActivityIcon(item.activity, item.location_name);
+  const accent = getCategoryAccent(iconType);
+  const svgPath = getActivitySvg(iconType);
+  const sequenceBadges = activeDayFilter !== null
+    ? group.items.map((gi) => {
+        const locItems = allItems.filter((i) => hasLocation(i));
+        return locItems.findIndex((ai) => ai.id === gi.id) + 1;
+      }).filter((n) => n > 0)
+    : undefined;
+  const icon = createIconMarker(color, accent, isSelected || isHovered, sequenceBadges, svgPath);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const openMarkerPopup = useCallback((event?: any) => {
     if (event) {
       L.DomEvent.stop(event);
       event.originalEvent?.preventDefault?.();
     }
-
     lastMarkerTap = Date.now();
     onPopupChange(locKey);
     onSelectItem(popupItem.id);
-    markerRef.current?.openPopup();
-
     const el = document.getElementById(`item-${popupItem.id}`);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [locKey, onPopupChange, onSelectItem, popupItem.id]);
 
   useEffect(() => {
     const marker = markerRef.current;
     if (!marker) return;
-
     marker.on("touchend" as keyof L.LeafletEventHandlerFnMap, openMarkerPopup);
-    return () => {
-      marker.off("touchend" as keyof L.LeafletEventHandlerFnMap, openMarkerPopup);
-    };
+    return () => { marker.off("touchend" as keyof L.LeafletEventHandlerFnMap, openMarkerPopup); };
   }, [openMarkerPopup]);
 
+  // Open/close popup based on selectedItemId (avoids race with poppedKey during remount)
   useEffect(() => {
-    if (isPopped) {
-      markerRef.current?.openPopup();
-    } else {
-      markerRef.current?.closePopup();
-    }
-  }, [isPopped, popupItem.id]);
+    if (isSelected) markerRef.current?.openPopup();
+    else markerRef.current?.closePopup();
+  }, [isSelected]);
 
   return (
     <Marker
@@ -512,20 +532,15 @@ function ItineraryMarker({
         mouseout: () => onHoverItem(null),
       }}
     >
-      <Popup
-        autoPan={false}
-        eventHandlers={{
-          remove: () => {
-            if (isPopped) onPopupChange(null);
-          },
-        }}
-      >
+      <Popup autoPan={false}>
         <PlacePopupContent
           popupItem={popupItem}
           displayDayIndex={displayDayIndex}
           item={item}
           group={group}
-          onSelectItem={onSelectItem}
+          allItems={allItems}
+          onNextStop={onNextStop}
+          onPrevStop={onPrevStop}
         />
       </Popup>
     </Marker>
@@ -533,133 +548,137 @@ function ItineraryMarker({
 }
 
 export function ItineraryMap() {
-  const {
-    days,
-    selectedItemId,
-    hoveredItemId,
-    selectItem,
-    hoverItem,
-    theme,
-  } = useItineraryStore();
-
-  const [tileTheme, setTileTheme] = useState<"light" | "dark">(theme);
+  const { days, selectedItemId, hoveredItemId, selectItem, hoverItem, theme, toggleTheme, activeDayFilter, setDayFilter } = useItineraryStore();
   const [fitBoundsFlag, setFitBoundsFlag] = useState(0);
   const [poppedKey, setPoppedKey] = useState<string | null>(null);
   const [userLocationFocusRequest, setUserLocationFocusRequest] = useState(0);
-  const [userLocation, setUserLocation] = useState<{
-    latitude: number;
-    longitude: number;
-  } | null>(null);
+  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [isLocating, setIsLocating] = useState(false);
 
-  const closePopups = useCallback(() => setPoppedKey(null), []);
-
-  const handleMarkerTap = useCallback(
-    (item: ItineraryItem) => {
-      setPoppedKey(`${item.latitude}-${item.longitude}`);
-      selectItem(item.id);
-      const el = document.getElementById(`item-${item.id}`);
-      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-    },
-    [selectItem],
+  const filteredDays = useMemo(
+    () => activeDayFilter !== null ? days.filter((_, i) => i === activeDayFilter) : days,
+    [days, activeDayFilter],
   );
-  const locateUser = useCallback(() => {
-    if (!("geolocation" in navigator)) {
-      toast.error("Location is not available in this browser.");
-      return;
-    }
 
+  const allItems = useMemo(() => filteredDays.flatMap((d) => d.items), [filteredDays]);
+
+  const closePopups = useCallback(() => { setPoppedKey(null); selectItem(null); }, [selectItem]);
+
+  const handleMarkerTap = useCallback((item: ItineraryItem) => {
+    setPoppedKey(`${item.latitude}-${item.longitude}`);
+    selectItem(item.id);
+    const el = document.getElementById(`item-${item.id}`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [selectItem]);
+
+  const navigateTo = useCallback((item: ItineraryItem) => {
+    setPoppedKey(`${item.latitude}-${item.longitude}`);
+    selectItem(item.id);
+    const el = document.getElementById(`item-${item.id}`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [selectItem]);
+
+  const handleNextStop = useCallback((item: ItineraryItem) => {
+    const startIdx = allItems.findIndex((i) => i.id === item.id);
+    // Scan forward within allItems for the next item with a location
+    for (let i = startIdx + 1; i < allItems.length; i++) {
+      if (hasLocation(allItems[i])) { navigateTo(allItems[i]); return; }
+    }
+    // Cross-day when filtered
+    if (activeDayFilter !== null) {
+      for (let d = activeDayFilter + 1; d < days.length; d++) {
+        const locItem = days[d]?.items?.find((i) => hasLocation(i));
+        if (locItem) { setDayFilter(d); navigateTo(locItem); return; }
+      }
+    }
+  }, [allItems, activeDayFilter, days, setDayFilter, navigateTo]);
+
+  const handlePrevStop = useCallback((item: ItineraryItem) => {
+    const startIdx = allItems.findIndex((i) => i.id === item.id);
+    // Scan backward within allItems for the previous item with a location
+    for (let i = startIdx - 1; i >= 0; i--) {
+      if (hasLocation(allItems[i])) { navigateTo(allItems[i]); return; }
+    }
+    // Cross-day when filtered
+    if (activeDayFilter !== null) {
+      for (let d = activeDayFilter - 1; d >= 0; d--) {
+        const dayItems = days[d]?.items ?? [];
+        for (let j = dayItems.length - 1; j >= 0; j--) {
+          if (hasLocation(dayItems[j])) { setDayFilter(d); navigateTo(dayItems[j]); return; }
+        }
+      }
+    }
+  }, [allItems, activeDayFilter, days, setDayFilter, navigateTo]);
+
+  const locateUser = useCallback(() => {
+    if (!("geolocation" in navigator)) { toast.error("Location is not available in this browser."); return; }
     setIsLocating(true);
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        setUserLocation({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        });
-        setUserLocationFocusRequest((value) => value + 1);
+        setUserLocation({ latitude: position.coords.latitude, longitude: position.coords.longitude });
+        setUserLocationFocusRequest((v) => v + 1);
         setIsLocating(false);
       },
       (error) => {
         setIsLocating(false);
-        if (!window.isSecureContext) {
-          toast.error(
-            "Current location needs localhost on desktop or HTTPS on mobile/LAN."
-          );
-          return;
-        }
+        if (!window.isSecureContext) { toast.error("Current location needs localhost on desktop or HTTPS on mobile/LAN."); return; }
         toast.error(error.message || "Could not get your current location.");
       },
-      {
-        enableHighAccuracy: true,
-        timeout: 15000,
-        maximumAge: 30000,
-      }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 },
     );
   }, []);
 
-  const allItems = useMemo(() => days.flatMap((d) => d.items), [days]);
-
-  // Group items by rounded coordinates for clustering
   const locationGroups = useMemo(() => {
-    const groups = new Map<
-      string,
-      { items: ItineraryItem[]; dayIndex: number }
-    >();
+    const groups = new Map<string, { items: ItineraryItem[]; dayIndex: number }>();
     allItems.forEach((item) => {
+      if (!hasLocation(item)) return;
       const key = `${item.latitude.toFixed(3)},${item.longitude.toFixed(3)}`;
-      if (!groups.has(key)) {
-        groups.set(key, {
-          items: [],
-          dayIndex: days.findIndex((d) => d.id === item.day_id),
-        });
-      }
+      if (!groups.has(key)) groups.set(key, { items: [], dayIndex: days.findIndex((d) => d.id === item.day_id) });
       groups.get(key)!.items.push(item);
     });
     return Array.from(groups.values());
   }, [allItems, days]);
 
-  // Route polylines per day
   const routes = useMemo(() => {
-    return days
-      .filter((d) => d.items.length >= 2)
-      .map((day, dayIndex) => ({
-        dayIndex,
-        positions: day.items.map(
-          (item) => [item.latitude, item.longitude] as [number, number]
-        ),
-        color: getDayColor(dayIndex),
-      }));
-  }, [days]);
+    return filteredDays.filter((d) => d.items.length >= 2).map((day) => {
+      const origIndex = days.findIndex((dd) => dd.id === day.id);
+      return {
+        dayIndex: origIndex,
+        positions: day.items
+          .filter((i) => hasLocation(i))
+          .map((item) => [item.latitude, item.longitude] as [number, number]),
+        color: getDayColor(origIndex >= 0 ? origIndex : 0),
+      };
+    });
+  }, [filteredDays, days]);
 
   const tileLayer = useMemo(() => {
-    if (tileTheme === "dark") {
-      return {
-        key: "dark",
-        url: "/api/map-tiles/dark/{z}/{x}/{y}",
-        attribution:
-          '&copy; <a href="https://openstreetmap.org/">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
-      };
+    if (theme === "dark") {
+      return { key: "dark", url: "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png", attribution: '&copy; <a href="https://openstreetmap.org/">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>' };
     }
-
-    return {
-      key: "light",
-      url: "/api/map-tiles/light/{z}/{x}/{y}?v=osm-2",
-      attribution:
-        '&copy; <a href="https://openstreetmap.org/">OpenStreetMap</a>',
-    };
-  }, [tileTheme]);
+    return { key: "light", url: "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png", attribution: '&copy; <a href="https://openstreetmap.org/">OpenStreetMap</a>' };
+  }, [theme]);
 
   useEffect(() => {
-    if (!selectedItemId) {
-      setPoppedKey(null);
-      return;
-    }
-
+    if (!selectedItemId) { setPoppedKey(null); return; }
     const selectedItem = allItems.find((item) => item.id === selectedItemId);
-    if (selectedItem) {
+    if (selectedItem && hasLocation(selectedItem)) {
       setPoppedKey(`${selectedItem.latitude}-${selectedItem.longitude}`);
     }
   }, [allItems, selectedItemId]);
+
+  // Match .leaflet-container background to tile colors (hides gap edges)
+  useEffect(() => {
+    const style = document.createElement("style");
+    style.id = "leaflet-bg-style";
+    style.textContent = `
+      .leaflet-container {
+        background: ${theme === "dark" ? "#2B2B2F" : "#F0EFEC"} !important;
+      }
+    `;
+    document.head.appendChild(style);
+    return () => { const el = document.getElementById("leaflet-bg-style"); if (el) el.remove(); };
+  }, [theme]);
 
   return (
     <div className="absolute inset-0">
@@ -667,14 +686,12 @@ export function ItineraryMap() {
         center={[43.2, 142.5]}
         zoom={7}
         style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
+        zoomSnap={1}
+        zoomDelta={1}
         zoomControl={false}
         attributionControl={false}
       >
-        <TileLayer
-          key={tileLayer.key}
-          attribution={tileLayer.attribution}
-          url={tileLayer.url}
-        />
+        <TileLayer key={tileLayer.key} attribution={tileLayer.attribution} url={tileLayer.url} tileSize={256} />
 
         <MapController
           selectedItemId={selectedItemId}
@@ -686,21 +703,14 @@ export function ItineraryMap() {
           userLocationFocusRequest={userLocationFocusRequest}
         />
 
-        {/* Route polylines */}
         {routes.map((route) => (
           <Polyline
             key={`route-${route.dayIndex}`}
             positions={route.positions}
-            pathOptions={{
-              color: route.color,
-              weight: 2,
-              opacity: 0.4,
-              dashArray: "5 5",
-            }}
+            pathOptions={{ color: route.color, weight: 2, opacity: 0.35, dashArray: "4 4" }}
           />
         ))}
 
-        {/* Markers */}
         {locationGroups.map((group) => {
           const item = group.items[0];
           const locKey = `${item.latitude}-${item.longitude}`;
@@ -710,10 +720,12 @@ export function ItineraryMap() {
               group={group}
               selectedItemId={selectedItemId}
               hoveredItemId={hoveredItemId}
-              poppedKey={poppedKey}
               onPopupChange={setPoppedKey}
               onSelectItem={selectItem}
               onHoverItem={hoverItem}
+              allItems={allItems}
+              onNextStop={handleNextStop}
+              onPrevStop={handlePrevStop}
             />
           );
         })}
@@ -722,48 +734,53 @@ export function ItineraryMap() {
           <CircleMarker
             center={[userLocation.latitude, userLocation.longitude]}
             radius={8}
-            pathOptions={{
-              color: "#ffffff",
-              weight: 3,
-              fillColor: "#4285F4",
-              fillOpacity: 1,
-            }}
+            pathOptions={{ color: "#ffffff", weight: 3, fillColor: "var(--color-accent)", fillOpacity: 1 }}
           >
             <Popup autoPan={false}>You are here</Popup>
           </CircleMarker>
         )}
       </MapContainer>
 
-      {/* Map controls */}
-      <div className="absolute right-4 top-4 z-[800] flex flex-col gap-2 lg:top-auto lg:bottom-4">
-        <button
-          onClick={() => {
-            setTileTheme(tileTheme === "dark" ? "light" : "dark");
-          }}
-          className="w-11 h-11 rounded-lg bg-white border border-gray-200 shadow-sm flex items-center justify-center hover:bg-gray-50 transition-colors"
-          aria-label="Toggle map style"
+      {/* Map controls — separated groups */}
+      <div className="absolute right-4 top-4 z-[800] flex flex-col gap-1.5">
+        {/* Primary: locate + fit */}
+        <div
+          className="flex flex-col gap-1 rounded-xl p-1.5 shadow-sm"
+          style={{ background: "var(--color-card)", border: "1px solid var(--color-border)" }}
         >
-          {tileTheme === "dark" ? (
-            <Sun className="w-5 h-5" />
-          ) : (
-            <Moon className="w-5 h-5" />
-          )}
-        </button>
-        <button
-          onClick={() => setFitBoundsFlag((f) => f + 1)}
-          className="w-11 h-11 rounded-lg bg-white border border-gray-200 shadow-sm flex items-center justify-center hover:bg-gray-50 transition-colors"
-          aria-label="Fit all markers"
+          <button
+            onClick={locateUser}
+            className="w-9 h-9 rounded-lg flex items-center justify-center hover:opacity-70 transition-opacity disabled:opacity-40"
+            style={{ background: "transparent", color: "var(--color-text)" }}
+            aria-label="Go to my current location"
+            disabled={isLocating}
+          >
+            <LocateFixed className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setFitBoundsFlag((f) => f + 1)}
+            className="w-9 h-9 rounded-lg flex items-center justify-center hover:opacity-70 transition-opacity"
+            style={{ background: "transparent", color: "var(--color-text)" }}
+            aria-label="Fit all markers"
+          >
+            <Maximize2 className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Secondary: theme toggle */}
+        <div
+          className="rounded-xl p-1.5 shadow-sm"
+          style={{ background: "var(--color-card)", border: "1px solid var(--color-border)" }}
         >
-          <Maximize2 className="w-5 h-5" />
-        </button>
-        <button
-          onClick={locateUser}
-          className="w-11 h-11 rounded-lg bg-white border border-gray-200 shadow-sm flex items-center justify-center hover:bg-gray-50 transition-colors disabled:opacity-60"
-          aria-label="Go to my current location"
-          disabled={isLocating}
-        >
-          <LocateFixed className="w-5 h-5" />
-        </button>
+          <button
+            onClick={toggleTheme}
+            className="w-9 h-9 rounded-lg flex items-center justify-center hover:opacity-70 transition-opacity"
+            style={{ background: "transparent", color: "var(--color-text)" }}
+            aria-label="Toggle dark/light mode"
+          >
+            {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          </button>
+        </div>
       </div>
     </div>
   );

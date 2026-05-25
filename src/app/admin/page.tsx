@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, createContext, useContext } from "react";
+import { useEffect, useState, useCallback, useRef, createContext, useContext } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { toast } from "sonner";
@@ -14,6 +14,8 @@ import {
   MapPin,
   GripVertical,
   Search,
+  Moon,
+  Sun,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -67,19 +69,18 @@ function SortableRow({
     isDragging,
   } = useSortable({ id: item.id });
 
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-  };
-
   return (
     <tr
       ref={setNodeRef}
-      style={style}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        borderColor: "var(--color-border)",
+      }}
       className={cn(
-        "border-b border-[var(--color-border)]/50 hover:bg-gray-50 dark:hover:bg-gray-800/30",
-        editingItem === item.id && "bg-blue-50/30",
-        isDragging && "opacity-50 bg-gray-100 shadow-lg z-10 relative"
+        "border-b transition-colors",
+        isDragging && "opacity-40",
+        editingItem === item.id && "bg-[var(--color-accent-muted)]"
       )}
     >
       <td className="px-1 sm:px-2 py-2">
@@ -181,6 +182,7 @@ export default function AdminDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [editingDay, setEditingDay] = useState<string | null>(null);
   const [editingItem, setEditingItem] = useState<string | null>(null);
+  const [newItemDayId, setNewItemDayId] = useState<string | null>(null);
   const [editDayForm, setEditDayForm] = useState({ title: "", date: "" });
   const [editItemForm, setEditItemForm] = useState({
     start_time: "",
@@ -200,10 +202,13 @@ export default function AdminDashboard() {
     longitude: 141.3544,
   });
   const [locationSearch, setLocationSearch] = useState("");
+  const [locationSearchRegion, setLocationSearchRegion] = useState("");
   const [locationResults, setLocationResults] = useState<LocationSearchResult[]>([]);
   const [isSearchingLocations, setIsSearchingLocations] = useState(false);
+  const lastSearchRef = useRef(0);
   const [locationFilter, setLocationFilter] = useState("");
   const [flyToKey, setFlyToKey] = useState(0);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
   const [showMerge, setShowMerge] = useState(false);
   const [mergeSource, setMergeSource] = useState("");
   const [mergeTarget, setMergeTarget] = useState("");
@@ -229,6 +234,19 @@ export default function AdminDashboard() {
     }
     fetchData();
   }, [token]);
+
+  // Sync theme state with document
+  useEffect(() => {
+    const html = document.documentElement;
+    const current = html.getAttribute("data-theme") || "light";
+    setTheme(current === "dark" ? "dark" : "light");
+    const observer = new MutationObserver(() => {
+      const t = html.getAttribute("data-theme") || "light";
+      setTheme(t === "dark" ? "dark" : "light");
+    });
+    observer.observe(html, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => observer.disconnect();
+  }, []);
 
   async function fetchData() {
     const headers = { Authorization: `Bearer ${token}` };
@@ -360,6 +378,7 @@ export default function AdminDashboard() {
       if (res.ok) {
         toast.success(item.id ? "Item updated" : "Item created");
         setEditingItem(null);
+        setNewItemDayId(null);
         fetchData();
       } else {
         toast.error("Failed to save item");
@@ -370,11 +389,16 @@ export default function AdminDashboard() {
 
   const searchLocations = useCallback(async () => {
     if (!locationSearch.trim()) return;
+    const now = Date.now();
+    if (now - lastSearchRef.current < 500) return;
+    lastSearchRef.current = now;
     setIsSearchingLocations(true);
     try {
       const headers = { Authorization: `Bearer ${token}` };
+      const params = new URLSearchParams({ q: locationSearch });
+      if (locationSearchRegion.trim()) params.set("region", locationSearchRegion.trim());
       const res = await fetch(
-        `/api/admin/location-search?q=${encodeURIComponent(locationSearch)}`,
+        `/api/admin/location-search?${params}`,
         { headers }
       );
       const data = await res.json();
@@ -386,7 +410,7 @@ export default function AdminDashboard() {
     } finally {
       setIsSearchingLocations(false);
     }
-  }, [locationSearch, token]);
+  }, [locationSearch, locationSearchRegion, token]);
 
   const saveLocation = useCallback(async () => {
     if (!locationForm.name.trim()) {
@@ -651,53 +675,79 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-[var(--color-muted)]">
-      <header className="flex-shrink-0 z-30 bg-[var(--color-background)]/80 backdrop-blur-lg border-b border-[var(--color-border)]">
-        <div className="max-w-6xl mx-auto px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between gap-2">
-          <h1 className="text-sm sm:text-lg font-medium truncate">Admin Dashboard</h1>
-          <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+    <div className="h-screen flex flex-col" style={{ background: "var(--color-bg)" }}>
+      <header className="flex-shrink-0 z-30" style={{ background: "var(--color-panel)", backdropFilter: "blur(12px)", borderBottom: "1px solid var(--color-border)" }}>
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-2">
+          <h1 className="text-base sm:text-lg font-semibold tracking-tight" style={{ color: "var(--color-text)" }}>Admin Dashboard</h1>
+          <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+            <button
+              onClick={() => {
+                const html = document.documentElement;
+                const isDark = theme === "dark";
+                html.setAttribute("data-theme", isDark ? "light" : "dark");
+                try { localStorage.setItem("theme", isDark ? "light" : "dark"); } catch {}
+                setTheme(isDark ? "light" : "dark");
+              }}
+              className="text-sm transition-opacity hover:opacity-70"
+              style={{ color: "var(--color-muted)" }}
+              aria-label="Toggle theme"
+            >
+              {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
             <a
               href="/"
               target="_blank"
-              className="text-xs text-[#4285F4] hover:underline whitespace-nowrap"
+              className="text-sm font-medium transition-opacity hover:opacity-70"
+              style={{ color: "var(--color-accent)" }}
             >
               View Site
             </a>
             <button
               onClick={logout}
-              className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+              className="flex items-center gap-1.5 text-sm transition-opacity hover:opacity-70"
+              style={{ color: "var(--color-muted)" }}
             >
-              <LogOut className="w-3 h-3" /> <span className="hidden sm:inline">Logout</span>
+              <LogOut className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Logout</span>
             </button>
           </div>
         </div>
-        <div className="max-w-6xl mx-auto px-3 sm:px-6 pb-2 flex gap-2">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 pb-3 flex gap-2">
           <button
             onClick={() => setActiveScreen("itinerary")}
             className={cn(
-              "h-8 px-3 rounded-lg text-xs font-medium",
+              "h-9 px-4 rounded-lg text-sm font-medium transition-all",
               activeScreen === "itinerary"
-                ? "bg-[#4285F4] text-white"
-                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                ? "text-white shadow-sm"
+                : "hover:opacity-70"
             )}
+            style={{
+              background: activeScreen === "itinerary" ? "var(--color-accent)" : "var(--color-card)",
+              color: activeScreen === "itinerary" ? "white" : "var(--color-text)",
+              border: activeScreen === "itinerary" ? "none" : "1px solid var(--color-border)",
+            }}
           >
             Itinerary
           </button>
           <button
             onClick={() => setActiveScreen("locations")}
             className={cn(
-              "h-8 px-3 rounded-lg text-xs font-medium",
+              "h-9 px-4 rounded-lg text-sm font-medium transition-all",
               activeScreen === "locations"
-                ? "bg-[#4285F4] text-white"
-                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                ? "text-white shadow-sm"
+                : "hover:opacity-70"
             )}
+            style={{
+              background: activeScreen === "locations" ? "var(--color-accent)" : "var(--color-card)",
+              color: activeScreen === "locations" ? "white" : "var(--color-text)",
+              border: activeScreen === "locations" ? "none" : "1px solid var(--color-border)",
+            }}
           >
             Locations
           </button>
         </div>
       </header>
 
-      <div className={`flex-1 w-full min-h-0 ${activeScreen !== "locations" ? "overflow-y-auto px-4 sm:px-6 py-6 max-w-6xl mx-auto space-y-6" : "overflow-hidden"}`}>
+      <div className={`flex-1 w-full min-h-0 ${activeScreen !== "locations" ? "overflow-y-auto px-4 sm:px-6 py-6 max-w-6xl mx-auto space-y-5" : "overflow-hidden"}`}>
         {activeScreen === "locations" ? (
           <div className="grid h-full grid-cols-[minmax(0,1fr)_minmax(360px,520px)] gap-6 p-6">
             {/* Map */}
@@ -769,9 +819,9 @@ export default function AdminDashboard() {
                   )}
                 </div>
 
-                {/* Scrollable content */}
-                <div className="flex-1 overflow-y-auto">
-                  <div className="p-3 space-y-3">
+                <div className="flex flex-col flex-1 min-h-0">
+                  {/* Fixed: search + form */}
+                  <div className="flex-shrink-0 p-3 space-y-3">
                     {/* Search */}
                     <div className="flex gap-1.5">
                       <div className="relative flex-1">
@@ -786,6 +836,13 @@ export default function AdminDashboard() {
                           <div className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 border-2 border-[#4285F4] border-t-transparent rounded-full animate-spin" />
                         )}
                       </div>
+                      <input
+                        value={locationSearchRegion}
+                        onChange={(e) => setLocationSearchRegion(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") searchLocations(); }}
+                        placeholder="Region (e.g. Japan or JP)"
+                        className="h-8 w-24 rounded-lg border text-xs px-2.5"
+                      />
                       <button
                         onClick={searchLocations}
                         disabled={isSearchingLocations}
@@ -804,7 +861,8 @@ export default function AdminDashboard() {
                             onClick={() =>
                               setLocationForm((current) => ({
                                 ...current,
-                                ...(current.id ? {} : { name: result.name, address: result.address }),
+                                name: result.name,
+                                address: result.address,
                                 latitude: result.latitude,
                                 longitude: result.longitude,
                               }))
@@ -817,8 +875,6 @@ export default function AdminDashboard() {
                         ))}
                       </div>
                     )}
-
-                    <div className="h-px bg-[var(--color-border)]" />
 
                     {/* Form fields */}
                     <div className="space-y-2">
@@ -864,10 +920,12 @@ export default function AdminDashboard() {
                         {locationForm.id ? "Update Location" : "Save Location"}
                       </button>
                     </div>
+                  </div>
 
-                    <div className="h-px bg-[var(--color-border)]" />
+                  <div className="h-px bg-[var(--color-border)] mx-3" />
 
-                    {/* Saved list */}
+                  {/* Scrollable: saved locations list */}
+                  <div className="flex-1 overflow-y-auto px-3 pb-3">
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-2">
@@ -1042,7 +1100,7 @@ export default function AdminDashboard() {
                   className="w-full h-8 px-2 mt-0.5 rounded border text-sm"
                 />
               ) : (
-                <p className="text-xs text-[var(--color-muted-foreground)]">{headerSubtitle}</p>
+                <p className="text-xs text-[var(--color-muted)]">{headerSubtitle}</p>
               )}
             </div>
             {isEditingHeader && (
@@ -1081,7 +1139,7 @@ export default function AdminDashboard() {
                 <DayDragHandle />
                 <div className="min-w-0">
                   <h2 className="font-medium text-xs sm:text-sm truncate">{day.title}</h2>
-                  <p className="text-[11px] sm:text-xs text-[var(--color-muted-foreground)]">
+                  <p className="text-[11px] sm:text-xs text-[var(--color-muted)]">
                     {day.date} — {day.items.length} items
                   </p>
                 </div>
@@ -1153,7 +1211,7 @@ export default function AdminDashboard() {
               >
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-[var(--color-border)] text-xs text-[var(--color-muted-foreground)]">
+                    <tr className="border-b border-[var(--color-border)] text-xs text-[var(--color-muted)]">
                       <th className="text-left px-2 py-2 font-medium w-10" />
                       <th className="text-left px-1 py-2 font-medium w-6">#</th>
                       <th className="text-left px-1 py-2 font-medium">Time</th>
@@ -1204,10 +1262,12 @@ export default function AdminDashboard() {
             </div>
 
             {/* Edit item form */}
-            {editingItem &&
+            {(editingItem || newItemDayId === day.id) &&
               (() => {
-                const item = day.items.find((i) => i.id === editingItem);
-                if (!item) return null;
+                const item = editingItem
+                  ? day.items.find((i) => i.id === editingItem)
+                  : null;
+                if (!item && newItemDayId !== day.id) return null;
                 return (
                   <div className="px-4 sm:px-6 py-3 sm:py-4 bg-blue-50/30 dark:bg-blue-900/10 border-t border-[var(--color-border)]">
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 mb-3">
@@ -1288,19 +1348,29 @@ export default function AdminDashboard() {
                     </div>
                     <div className="flex gap-2">
                       <button
-                        onClick={() =>
-                          saveItem({
-                            id: item.id,
-                            day_id: item.day_id,
-                            ...editItemForm,
-                          })
-                        }
+                        onClick={() => {
+                          if (newItemDayId) {
+                            saveItem({
+                              ...editItemForm,
+                              day_id: newItemDayId,
+                            });
+                          } else if (item) {
+                            saveItem({
+                              id: item.id,
+                              day_id: item.day_id,
+                              ...editItemForm,
+                            });
+                          }
+                        }}
                         className="h-8 px-4 bg-[#4285F4] text-white rounded-lg text-xs font-medium flex items-center gap-1"
                       >
                         <Save className="w-3 h-3" /> Save Item
                       </button>
                       <button
-                        onClick={() => setEditingItem(null)}
+                        onClick={() => {
+                          setEditingItem(null);
+                          setNewItemDayId(null);
+                        }}
                         className="h-8 px-4 bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-100 rounded-lg text-xs"
                       >
                         Cancel
@@ -1316,11 +1386,11 @@ export default function AdminDashboard() {
                 onClick={() => {
                   const newSort =
                     Math.max(0, ...day.items.map((i) => i.sort_order)) + 1;
-                  saveItem({
-                    day_id: day.id,
+                  setNewItemDayId(day.id);
+                  setEditItemForm({
                     start_time: "09:00",
                     end_time: "",
-                    activity: "New Activity",
+                    activity: "",
                     location_id: locations[0]?.id || "",
                     description: "",
                     notes: "",

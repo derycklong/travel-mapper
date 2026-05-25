@@ -76,6 +76,32 @@ if (!itemColumns.some((column) => column.name === "location_id")) {
   db.prepare("CREATE INDEX IF NOT EXISTS idx_items_location_id ON itinerary_items(location_id)").run();
 }
 
+if (!itemColumns.some((column) => column.name === "google_maps_url")) {
+  db.prepare("ALTER TABLE itinerary_items ADD COLUMN google_maps_url TEXT").run();
+}
+
+// Cache tables for Google Places API cost reduction
+db.exec(`
+  CREATE TABLE IF NOT EXISTS place_cache (
+    location_name TEXT PRIMARY KEY,
+    place_json TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS location_search_cache (
+    query_hash TEXT PRIMARY KEY,
+    results_json TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS place_photos (
+    photo_ref TEXT PRIMARY KEY,
+    data BLOB NOT NULL,
+    mime_type TEXT NOT NULL DEFAULT 'image/jpeg',
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+`);
+
 db.exec(`
   INSERT OR IGNORE INTO locations (id, name, latitude, longitude, address)
   SELECT

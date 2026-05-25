@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useSyncExternalStore, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import dynamic from "next/dynamic";
 import { useItineraryStore } from "@/store/itinerary";
 import { HeroSection } from "./HeroSection";
 import { DayTimeline } from "./DayTimeline";
 import { DayFilter } from "./DayFilter";
+import { Drawer } from "vaul";
 import { List, X } from "lucide-react";
 import type { DayWithItems } from "@/lib/types";
 
@@ -20,36 +21,10 @@ interface ItineraryAppProps {
   tripSubtitle: string;
 }
 
-const desktopQuery = "(min-width: 1024px)";
-
-function subscribeToDesktopQuery(onStoreChange: () => void) {
-  const mql = window.matchMedia(desktopQuery);
-  mql.addEventListener("change", onStoreChange);
-  return () => mql.removeEventListener("change", onStoreChange);
-}
-
-function getDesktopSnapshot() {
-  return window.matchMedia(desktopQuery).matches;
-}
-
-function getServerDesktopSnapshot() {
-  return false;
-}
-
 export function ItineraryApp({ initialDays, tripTitle, tripSubtitle }: ItineraryAppProps) {
-  const isDesktop = useSyncExternalStore(
-    subscribeToDesktopQuery,
-    getDesktopSnapshot,
-    getServerDesktopSnapshot
-  );
-
   const [panelOpen, setPanelOpen] = useState(false);
-  const panelTouchStartY = useRef<number | null>(null);
-  const closePanel = useCallback(() => setPanelOpen(false), []);
-
-  useEffect(() => {
-    if (isDesktop) setPanelOpen(false);
-  }, [isDesktop]);
+  const prevDesktop = useRef(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     useItineraryStore.setState({
@@ -61,18 +36,60 @@ export function ItineraryApp({ initialDays, tripTitle, tripSubtitle }: Itinerary
     });
   }, [initialDays, tripTitle, tripSubtitle]);
 
+  // Sync store theme from <html> data attribute (set by inline script before paint)
+  useEffect(() => {
+    const htmlTheme = document.documentElement.getAttribute("data-theme");
+    if (htmlTheme === "dark" || htmlTheme === "light") {
+      useItineraryStore.setState({ theme: htmlTheme });
+    }
+  }, []);
+
+  // Close bottom sheet when resizing to desktop
+  useEffect(() => {
+    const mql = window.matchMedia("(min-width: 1024px)");
+    const handler = (e: MediaQueryListEvent | MediaQueryList) => {
+      if (e.matches && !prevDesktop.current) {
+        setPanelOpen(false);
+      }
+      prevDesktop.current = e.matches;
+    };
+    handler(mql);
+    mql.addEventListener("change", handler);
+    return () => mql.removeEventListener("change", handler);
+  }, []);
+
+  // Restore drawer scroll position when reopening
+  useEffect(() => {
+    if (!panelOpen) return;
+    const saved = sessionStorage.getItem("drawer-scroll");
+    if (!saved) return;
+    const scrollTo = parseInt(saved, 10);
+    // Retry a few times to ensure the DOM is settled after portal mount
+    let attempts = 0;
+    const tryRestore = () => {
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTop = scrollTo;
+      } else if (attempts < 5) {
+        attempts++;
+        setTimeout(tryRestore, 50);
+      }
+    };
+    tryRestore();
+  }, [panelOpen]);
+
   if (!Array.isArray(initialDays) || initialDays.length === 0) {
     return (
-      <div className="h-full flex items-center justify-center px-4">
+      <div className="h-full flex items-center justify-center px-4" style={{ background: "var(--color-bg)" }}>
         <div className="text-center max-w-sm">
           <div className="text-4xl mb-4">&#128506;</div>
-          <h2 className="text-lg font-medium mb-2">No itinerary data</h2>
-          <p className="text-sm text-gray-500 mb-4">
+          <h2 className="text-lg font-medium mb-2" style={{ color: "var(--color-text)" }}>No itinerary data</h2>
+          <p className="text-sm mb-4" style={{ color: "var(--color-muted)" }}>
             The itinerary is empty. Add some days and items in the admin panel.
           </p>
           <a
             href="/admin"
-            className="inline-flex items-center gap-2 px-4 py-2 bg-[#4285F4] text-white rounded-lg text-sm font-medium hover:bg-[#3367d6] transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2 text-white rounded-lg text-sm font-medium transition-colors"
+            style={{ background: "var(--color-accent)" }}
           >
             Go to Admin
           </a>
@@ -82,91 +99,85 @@ export function ItineraryApp({ initialDays, tripTitle, tripSubtitle }: Itinerary
   }
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      {/* Hero: always shown on desktop, hidden on mobile (shown inside panel) */}
-      <div className="hidden lg:block flex-shrink-0">
-        <HeroSection title={tripTitle} subtitle={tripSubtitle} />
+    <div className="h-full relative" style={{ background: "var(--color-bg)" }}>
+      {/* Single fullscreen map — shared by both layouts */}
+      <div className="absolute inset-0 isolate">
+        <ItineraryMap />
       </div>
 
-      {/* Desktop layout: timeline sidebar + map */}
-      {isDesktop && (
-        <div className="flex-1 flex max-w-[1440px] mx-auto w-full min-h-0">
-          <aside className="w-[480px] xl:w-[560px] flex-shrink-0 border-r border-[var(--color-border)] flex flex-col min-h-0">
-            <DayFilter days={initialDays} />
-            <DayTimeline days={initialDays} />
-          </aside>
-          <main className="flex-1 min-h-0 relative">
-            <ItineraryMap />
-          </main>
-        </div>
-      )}
-
-      {/* Mobile layout: full-screen map + floating button + slide-over panel */}
-      {!isDesktop && (
-        <>
-          <div className="flex-1 min-h-0 relative">
-            <ItineraryMap />
+      {/* Desktop layout — hidden below lg */}
+      <div className="hidden lg:block absolute inset-0 z-10 pointer-events-none">
+        <aside
+          className="absolute top-4 bottom-4 left-4 pointer-events-auto flex flex-col overflow-hidden rounded-2xl shadow-lg"
+          style={{
+            width: 400,
+            background: "var(--color-card)",
+            border: "1px solid var(--color-border)",
+          }}
+        >
+          <div className="flex-shrink-0 px-5 pt-5 pb-1">
+            <HeroSection title={tripTitle} subtitle={tripSubtitle} />
           </div>
+          <DayFilter days={initialDays} />
+          <div className="flex-1 min-h-0 overflow-y-auto px-1 pb-4">
+            <DayTimeline days={initialDays} />
+          </div>
+        </aside>
+      </div>
 
-          <button
-            onClick={() => setPanelOpen(true)}
-            className="fixed right-4 z-[900] h-14 px-5 bg-[#1a1a1a] text-white rounded-full shadow-lg flex items-center gap-2 hover:bg-[#333] transition-colors active:scale-95 touch-manipulation select-none"
-            style={{ bottom: "max(1.5rem, calc(env(safe-area-inset-bottom) + 1rem))" }}
-            aria-label="Open itinerary"
-          >
-            <List className="w-5 h-5" />
-            <span className="text-sm font-medium">Itinerary</span>
-          </button>
-
-          {panelOpen && (
-            <div className="fixed inset-0 z-[1000]">
-              <div
-                className="absolute inset-0 bg-black/50"
-                onClick={closePanel}
-              />
-              <div
-                className="absolute bottom-0 left-0 right-0 bg-[var(--color-background)] flex flex-col rounded-t-2xl overflow-hidden"
-                onTouchStart={(event) => {
-                  panelTouchStartY.current = event.touches[0]?.clientY ?? null;
-                }}
-                onTouchEnd={(event) => {
-                  const startY = panelTouchStartY.current;
-                  panelTouchStartY.current = null;
-                  const endY = event.changedTouches[0]?.clientY;
-                  if (startY !== null && endY !== undefined && endY - startY > 80) {
-                    closePanel();
-                  }
-                }}
-                style={{
-                  top: "max(10vh, env(safe-area-inset-top))",
-                  animation: "slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
-                }}
-              >
-                <button
-                  onClick={closePanel}
-                  className="absolute top-4 right-4 z-40 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm shadow-sm hover:bg-white dark:hover:bg-gray-900 transition-colors"
-                  aria-label="Close itinerary"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-                <HeroSection title={tripTitle} subtitle={tripSubtitle} />
-                <DayFilter days={initialDays} />
-                <div className="flex-1 min-h-0 overflow-y-auto">
-                  <DayTimeline days={initialDays} onItemSelect={closePanel} />
-                </div>
+      {/* Mobile layout — hidden above lg */}
+      <div className="block lg:hidden absolute inset-0 z-10 pointer-events-none">
+        <Drawer.Root open={panelOpen} onOpenChange={setPanelOpen}>
+          <Drawer.Trigger asChild>
+            <button
+              className="fixed right-4 z-[900] h-12 px-5 rounded-full shadow-lg flex items-center gap-2 transition-colors active:scale-95 pointer-events-auto touch-manipulation select-none"
+              style={{
+            background: "var(--color-card)",
+                color: "var(--color-text)",
+                border: "1px solid var(--color-border)",
+                bottom: "max(1.5rem, calc(env(safe-area-inset-bottom) + 1rem))",
+              }}
+              aria-label="Open itinerary"
+            >
+              <List className="w-4 h-4" />
+              <span className="text-sm font-medium">Itinerary</span>
+            </button>
+          </Drawer.Trigger>
+          <Drawer.Portal>
+            <Drawer.Overlay className="fixed inset-0 bg-black/40 z-40" />
+            <Drawer.Content
+              aria-describedby="drawer-description"
+              className="fixed bottom-0 left-0 right-0 z-50 flex flex-col rounded-t-2xl overflow-hidden"
+              style={{
+                background: "var(--color-bg)",
+                maxHeight: "90vh",
+              }}
+            >
+              <Drawer.Title className="sr-only">Itinerary</Drawer.Title>
+              <div id="drawer-description" className="sr-only">List of itinerary items grouped by day</div>
+              <div className="flex-shrink-0 flex justify-center pt-3 pb-1">
+                <div
+                  className="w-10 h-1 rounded-full"
+                  style={{ background: "var(--color-muted)" }}
+                />
               </div>
-            </div>
-          )}
-        </>
-      )}
-
-      {/* slideUp keyframe — injected via style tag so it's always available */}
-      <style jsx>{`
-        @keyframes slideUp {
-          from { transform: translateY(100%); }
-          to { transform: translateY(0); }
-        }
-      `}</style>
+              <div className="flex-shrink-0 px-5 pt-1 pb-1">
+                <HeroSection title={tripTitle} subtitle={tripSubtitle} />
+              </div>
+              <DayFilter days={initialDays} />
+              <div
+                ref={scrollContainerRef}
+                onScroll={(e) => {
+                  sessionStorage.setItem("drawer-scroll", String(e.currentTarget.scrollTop));
+                }}
+                className="flex-1 min-h-0 overflow-y-auto px-1 pb-6"
+              >
+                <DayTimeline days={initialDays} onItemSelect={() => setPanelOpen(false)} />
+              </div>
+            </Drawer.Content>
+          </Drawer.Portal>
+        </Drawer.Root>
+      </div>
     </div>
   );
 }

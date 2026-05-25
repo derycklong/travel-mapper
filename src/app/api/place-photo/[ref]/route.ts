@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getEnv } from "@/lib/env";
+import db from "@/lib/db";
 
 export async function GET(
   _request: Request,
@@ -8,6 +9,20 @@ export async function GET(
   const { ref } = await params;
   if (!ref) return NextResponse.json({ error: "Missing photo reference" }, { status: 400 });
 
+  // Check DB cache first
+  const cached = db.prepare("SELECT data, mime_type FROM place_photos WHERE photo_ref = ?").get(ref) as { data: Buffer; mime_type: string } | undefined;
+  if (cached) {
+    console.log(`[place-photo] CACHE HIT: ${ref.slice(0, 16)}…`);
+    return new NextResponse(new Uint8Array(cached.data), {
+      status: 200,
+      headers: {
+        "Content-Type": cached.mime_type,
+        "Cache-Control": "public, max-age=86400",
+      },
+    });
+  }
+
+  // Not cached — fetch, store, and serve
   const apiKey = getEnv("GOOGLE_MAPS_API_KEY");
   if (!apiKey) {
     return NextResponse.json({ error: "API key not configured" }, { status: 500 });
@@ -19,17 +34,36 @@ export async function GET(
   url.searchParams.set("key", apiKey);
 
   try {
-    const response = await fetch(url);
-    // Google Places Photo API returns a 302 redirect to the actual image
-    const imageUrl = response.url;
-    if (!imageUrl || imageUrl.includes("maps.googleapis.com")) {
+    const redirectResp = await fetch(url, { redirect: "manual" });
+    if (redirectResp.status !== 302 && redirectResp.status !== 303) {
       return NextResponse.json({ error: "Failed to get photo" }, { status: 502 });
     }
-    const imageRes = await fetch(imageUrl);
-    const blob = await imageRes.blob();
-    return new NextResponse(blob, {
+
+    const location = redirectResp.headers.get("location");
+    if (!location) {
+      return NextResponse.json({ error: "Missing photo redirect" }, { status: 502 });
+    }
+
+    const imgResp = await fetch(location);
+    if (!imgResp.ok) {
+      return NextResponse.redirect(location, 302);
+    }
+
+    console.log(`[place-photo] GOOGLE FETCH: ${ref.slice(0, 16)}…`);
+    const buffer = Buffer.from(await imgResp.arrayBuffer());
+    const mime = imgResp.headers.get("content-type") || "image/jpeg";
+
+    // Store in DB (fire-and-forget style within the handler)
+    try {
+      db.prepare(
+        "INSERT OR REPLACE INTO place_photos (photo_ref, data, mime_type, created_at) VALUES (?, ?, ?, datetime('now'))"
+      ).run(ref, buffer, mime);
+    } catch { /* storage failure is non-critical */ }
+
+    return new NextResponse(new Uint8Array(buffer), {
+      status: 200,
       headers: {
-        "Content-Type": imageRes.headers.get("content-type") || "image/jpeg",
+        "Content-Type": mime,
         "Cache-Control": "public, max-age=86400",
       },
     });
