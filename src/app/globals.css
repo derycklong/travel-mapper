@@ -1,0 +1,136 @@
+@import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
+
+@theme inline {
+  --color-background: #ffffff;
+  --color-foreground: #171717;
+  --color-accent: #4285F4;
+  --color-card: #f8f8f8;
+  --color-border: #e5e5e5;
+  --color-muted: #f5f5f5;
+  --color-muted-foreground: #737373;
+  --font-sans: 'Google Sans', 'Roboto', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: ui-monospace, monospace;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-background: #121212;
+    --color-foreground: #ededed;
+    --color-card: #1e1e1e;
+    --color-border: #2e2e2e;
+    --color-muted: #1a1a1a;
+    --color-muted-foreground: #9ca3af;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+input,
+select,
+textarea {
+  background: #ffffff;
+  color: #171717;
+  border-color: #d1d5db;
+}
+
+select option {
+  background: #ffffff;
+  color: #171717;
+}
+
+@media (prefers-color-scheme: dark) {
+  input,
+  select,
+  textarea,
+  select option {
+    background: #111827;
+    color: #f9fafb;
+    border-color: #374151;
+  }
+}
+
+/* Leaflet popup customizations */
+.leaflet-popup-content-wrapper {
+  border-radius: 12px !important;
+  box-shadow: 0 2px 16px rgba(0,0,0,0.12) !important;
+}
+.leaflet-popup-content {
+  font-family: inherit !important;
+  margin: 10px 14px !important;
+  max-width: 80vw !important;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d0d0d0;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #b0b0b0;
+}
+
+/* Card hover effect */
+.itinerary-card {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.itinerary-card:hover {
+  transform: translateX(4px);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+}
+
+.leaflet-container {
+  background: #f0f0f0;
+}
+
+
+
+/* Hide scrollbar while keeping scroll */
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Loading shimmer animation */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 8px;
+}
