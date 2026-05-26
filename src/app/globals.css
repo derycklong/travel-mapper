@@ -138,6 +138,17 @@ select option {
   mix-blend-mode: normal;
 }
 
+/* Eliminate tile seam lines */
+.leaflet-container .leaflet-tile-pane img.leaflet-tile {
+  display: block;
+  image-rendering: auto;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transform: scale(1.004);
+  -webkit-transform: scale(1.004);
+  will-change: transform;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 4px;
@@ -162,10 +173,10 @@ select option {
   display: none;
 }
 
-/* Marker bounce */
+/* Marker pop */
 @keyframes bounce {
-  0% { transform: scale(0.6); opacity: 0; }
-  60% { transform: scale(1.1); }
+  0% { transform: scale(0.92); }
+  50% { transform: scale(1.06); }
   100% { transform: scale(1); opacity: 1; }
 }
 

@@ -37,6 +37,7 @@ yarn-error.log*
 *.db
 *.db-shm
 *.db-wal
+!data/itinerary.db
 
 # vercel
 .vercel

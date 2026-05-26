@@ -243,12 +243,22 @@ function MapController({
     const item = allItems.find((i) => i.id === selectedItemId);
     if (!item) return;
     if (!hasLocation(item)) return;
+    const target = L.latLng(item.latitude, item.longitude);
+    const center = map.getCenter();
+    const pixelDist = map.latLngToContainerPoint(center).distanceTo(
+      map.latLngToContainerPoint(target)
+    );
     // On mobile, delay to let Vaul drawer close animation finish before centering
     const delay = window.innerWidth < 1024 ? 300 : 0;
     const timer = setTimeout(() => {
       try {
         map.invalidateSize({ pan: false });
-        map.flyTo([item.latitude, item.longitude], 16, { duration: 1 });
+        if (pixelDist < 10) {
+          // Already very close — skip animation to avoid vibration
+          map.setView(target, 16, { animate: false });
+        } else {
+          map.flyTo(target, 16, { duration: 1 });
+        }
       } catch {}
     }, delay);
     return () => { clearTimeout(timer); };
@@ -307,7 +317,7 @@ function PlacePopupContent({ popupItem, displayDayIndex, item, group, allItems, 
   const accent = getCategoryAccent(iconType);
 
   return (
-    <div style={{ fontFamily: "inherit", minWidth: 220, maxWidth: 300, fontSize: 13, lineHeight: 1.4 }}>
+    <div style={{ fontFamily: "inherit", width: 300, fontSize: 13, lineHeight: 1.4 }}>
       {/* Photo with gradient overlay */}
       {place?.photos?.length ? (
         <div style={{ position: "relative", height: 140, overflow: "hidden", background: "var(--color-card)" }}>
@@ -474,6 +484,7 @@ function ItineraryMarker({
   onPrevStop: (item: ItineraryItem) => void;
 }) {
   const markerRef = useRef<L.Marker | null>(null);
+  const map = useMap();
   const item = group.items[0];
   const locKey = `${item.latitude}-${item.longitude}`;
   const isSelected = group.items.some((i) => i.id === selectedItemId);
@@ -514,11 +525,25 @@ function ItineraryMarker({
     return () => { marker.off("touchend" as keyof L.LeafletEventHandlerFnMap, openMarkerPopup); };
   }, [openMarkerPopup]);
 
-  // Open/close popup based on selectedItemId (avoids race with poppedKey during remount)
+  // Open/close popup based on selectedItemId
+  // On mobile, delay popup open until flyTo completes to avoid resize jitter
   useEffect(() => {
-    if (isSelected) markerRef.current?.openPopup();
-    else markerRef.current?.closePopup();
-  }, [isSelected]);
+    if (isSelected) {
+      const isMobile = window.innerWidth < 1024;
+      if (isMobile) {
+        if ((map as any).isMoving?.()) {
+          const open = () => { markerRef.current?.openPopup(); };
+          map.once("moveend", open);
+          return () => { map.off("moveend", open); };
+        }
+        setTimeout(() => markerRef.current?.openPopup(), 300);
+      } else {
+        markerRef.current?.openPopup();
+      }
+    } else {
+      markerRef.current?.closePopup();
+    }
+  }, [isSelected, map]);
 
   return (
     <Marker
@@ -532,7 +557,7 @@ function ItineraryMarker({
         mouseout: () => onHoverItem(null),
       }}
     >
-      <Popup autoPan={false}>
+      <Popup autoPan={false} maxWidth={300} minWidth={300} className="fixed-width-popup">
         <PlacePopupContent
           popupItem={popupItem}
           displayDayIndex={displayDayIndex}
@@ -667,14 +692,14 @@ export function ItineraryMap() {
     }
   }, [allItems, selectedItemId]);
 
-  // Match .leaflet-container background to tile colors (hides gap edges)
+  // Match .leaflet-container + tile pane background to tile colors (hides seam lines)
   useEffect(() => {
+    const bg = theme === "dark" ? "#2B2B2F" : "#F0EFEC";
     const style = document.createElement("style");
     style.id = "leaflet-bg-style";
     style.textContent = `
-      .leaflet-container {
-        background: ${theme === "dark" ? "#2B2B2F" : "#F0EFEC"} !important;
-      }
+      .leaflet-container { background: ${bg} !important; }
+      .leaflet-tile-pane { background: ${bg}; }
     `;
     document.head.appendChild(style);
     return () => { const el = document.getElementById("leaflet-bg-style"); if (el) el.remove(); };

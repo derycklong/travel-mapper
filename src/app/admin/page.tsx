@@ -251,31 +251,43 @@ export default function AdminDashboard() {
   async function fetchData() {
     const headers = { Authorization: `Bearer ${token}` };
 
-    const [daysResult, itemsResult, locationsResult, settingsResult] = await Promise.allSettled([
-      fetch("/api/admin/days", { headers }).then((r) => r.ok ? r.json() : { days: [] }),
-      fetch("/api/admin/items", { headers }).then((r) => r.ok ? r.json() : { items: [] }),
-      fetch("/api/admin/locations", { headers }).then((r) => r.ok ? r.json() : { locations: [] }),
-      fetch("/api/settings").then((r) => r.ok ? r.json() : {}),
-    ]);
+    try {
+      const [daysRes, itemsRes, locationsRes, settingsRes] = await Promise.all([
+        fetch("/api/admin/days", { headers }),
+        fetch("/api/admin/items", { headers }),
+        fetch("/api/admin/locations", { headers }),
+        fetch("/api/settings"),
+      ]);
 
-    const daysData = daysResult.status === "fulfilled" ? daysResult.value : { days: [] };
-    const itemsData = itemsResult.status === "fulfilled" ? itemsResult.value : { items: [] };
-    const locationsData = locationsResult.status === "fulfilled" ? locationsResult.value : { locations: [] };
-    const settingsData: Record<string, string> = settingsResult.status === "fulfilled" ? settingsResult.value : {};
+      if (daysRes.status === 401 || itemsRes.status === 401 || locationsRes.status === 401) {
+        localStorage.removeItem("admin_token");
+        router.push("/admin/login");
+        return;
+      }
 
-    const daysWithItems = (daysData.days || []).map((day: ItineraryDay) => ({
-      ...day,
-      items: ((itemsData.items || []) as ItineraryItem[])
-        .filter((item: ItineraryItem) => item.day_id === day.id)
-        .sort((a, b) => a.sort_order - b.sort_order),
-    }));
-    setDays(daysWithItems);
-    setLocations(locationsData.locations || []);
+      const [daysData, itemsData, locationsData, settingsData] = await Promise.all([
+        daysRes.ok ? daysRes.json() : { days: [] },
+        itemsRes.ok ? itemsRes.json() : { items: [] },
+        locationsRes.ok ? locationsRes.json() : { locations: [] },
+        settingsRes.ok ? settingsRes.json() : {} as Record<string, string>,
+      ]);
 
-    if (settingsData.trip_title) setHeaderTitle(settingsData.trip_title);
-    if (settingsData.trip_subtitle) setHeaderSubtitle(settingsData.trip_subtitle);
+      const daysWithItems = (daysData.days || []).map((day: ItineraryDay) => ({
+        ...day,
+        items: ((itemsData.items || []) as ItineraryItem[])
+          .filter((item: ItineraryItem) => item.day_id === day.id)
+          .sort((a, b) => a.sort_order - b.sort_order),
+      }));
+      setDays(daysWithItems);
+      setLocations(locationsData.locations || []);
 
-    setIsLoading(false);
+      if (settingsData.trip_title) setHeaderTitle(settingsData.trip_title);
+      if (settingsData.trip_subtitle) setHeaderSubtitle(settingsData.trip_subtitle);
+    } catch (e) {
+      console.error("Failed to load admin data:", e);
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   const saveHeader = useCallback(async () => {
