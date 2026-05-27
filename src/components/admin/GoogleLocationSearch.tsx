@@ -61,9 +61,16 @@ export default function GoogleLocationSearch({ token, onSelectResult }: GoogleLo
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter") {
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      doSearch();
+      doSearchRef.current();
     }
-  }, [doSearch]);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
 
   return (
     <div>
@@ -74,6 +81,7 @@ export default function GoogleLocationSearch({ token, onSelectResult }: GoogleLo
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Search Google Maps..."
+            aria-label="Search location"
             className="h-9 w-full pl-3 pr-9 rounded-xl border text-sm"
             style={{ borderColor: "var(--color-border)", background: "var(--color-card)", color: "var(--color-text)" }}
           />
@@ -86,6 +94,7 @@ export default function GoogleLocationSearch({ token, onSelectResult }: GoogleLo
           onChange={(e) => setRegion(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Region"
+          aria-label="Filter by region"
           className="h-9 w-20 rounded-xl border text-sm px-3"
           style={{ borderColor: "var(--color-border)", background: "var(--color-card)", color: "var(--color-text)" }}
         />
@@ -103,7 +112,7 @@ export default function GoogleLocationSearch({ token, onSelectResult }: GoogleLo
         <div className="mt-2 max-h-40 overflow-y-auto rounded-xl border divide-y text-xs" style={{ borderColor: "var(--color-border)" }}>
           {results.map((result, i) => (
             <button
-              key={`${result.latitude}-${result.longitude}-${i}`}
+              key={`${result.latitude}-${result.longitude}-${result.name}`}
               onClick={() => onSelectResult(result)}
               className="w-full px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors"
             >
