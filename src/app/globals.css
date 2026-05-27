@@ -138,7 +138,12 @@ select option {
   mix-blend-mode: normal;
 }
 
-/* Eliminate tile seam lines */
+@keyframes tileFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Eliminate tile seam lines + add fade-in */
 .leaflet-container .leaflet-tile-pane img.leaflet-tile {
   display: block;
   image-rendering: auto;
@@ -147,6 +152,7 @@ select option {
   transform: scale(1.004);
   -webkit-transform: scale(1.004);
   will-change: transform;
+  animation: tileFadeIn 0.25s ease-out;
 }
 
 /* Scrollbar */
