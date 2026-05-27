@@ -23,8 +23,6 @@ export default function GoogleLocationSearch({ token, onSelectResult }: GoogleLo
   const [isSearching, setIsSearching] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const doSearchRef = useRef(doSearch);
-  doSearchRef.current = doSearch;
 
   const doSearch = useCallback(async () => {
     if (!query.trim() || !token) return;
@@ -54,16 +52,16 @@ export default function GoogleLocationSearch({ token, onSelectResult }: GoogleLo
   const handleSearch = useCallback(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      doSearchRef.current();
+      doSearch();
     }, 500);
-  }, []);
+  }, [doSearch]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter") {
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      doSearchRef.current();
+      doSearch();
     }
-  }, []);
+  }, [doSearch]);
 
   useEffect(() => {
     return () => {
@@ -110,7 +108,7 @@ export default function GoogleLocationSearch({ token, onSelectResult }: GoogleLo
       </div>
       {results.length > 0 && (
         <div className="mt-2 max-h-40 overflow-y-auto rounded-xl border divide-y text-xs" style={{ borderColor: "var(--color-border)" }}>
-          {results.map((result, i) => (
+          {results.map((result) => (
             <button
               key={`${result.latitude}-${result.longitude}-${result.name}`}
               onClick={() => onSelectResult(result)}

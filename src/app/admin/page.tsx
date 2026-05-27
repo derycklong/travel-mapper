@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef, createContext, useContext } from "react";
+import { useEffect, useState, useCallback, createContext, useContext } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { toast } from "sonner";
@@ -17,6 +17,7 @@ import {
   Moon,
   Sun,
 } from "lucide-react";
+import * as Dialog from "@radix-ui/react-dialog";
 import { cn } from "@/lib/utils";
 import {
   DndContext,
@@ -40,12 +41,15 @@ const AdminLocationMap = dynamic(
   { ssr: false }
 );
 
-interface LocationSearchResult {
-  name: string;
-  address: string;
-  latitude: number;
-  longitude: number;
-}
+const EditLocationDialog = dynamic(
+  () => import("@/components/admin/EditLocationDialog").then((mod) => mod.EditLocationDialog),
+  { ssr: false }
+);
+
+const GoogleLocationSearch = dynamic(
+  () => import("@/components/admin/GoogleLocationSearch"),
+  { ssr: false }
+);
 
 function SortableRow({
   item,
@@ -198,17 +202,10 @@ export default function AdminDashboard() {
   const [locationFilter, setLocationFilter] = useState("");
   const [flyToKey, setFlyToKey] = useState(0);
   const [theme, setTheme] = useState<"light" | "dark">("light");
-  const [showMerge, setShowMerge] = useState(false);
-  const [mergeSource, setMergeSource] = useState("");
-  const [mergeTarget, setMergeTarget] = useState("");
-  const [isMerging, setIsMerging] = useState(false);
   const [editingLocation, setEditingLocation] = useState<Location | null>(null);
-  const [locationSearch, setLocationSearch] = useState("");
-  const [locationSearchRegion, setLocationSearchRegion] = useState("");
-  const [locationResults, setLocationResults] = useState<LocationSearchResult[]>([]);
-  const [isSearchingLocations, setIsSearchingLocations] = useState(false);
-  const [showSearch, setShowSearch] = useState(false);
-  const lastSearchRef = useRef(0);
+  const [mergeSourceId, setMergeSourceId] = useState("");
+  const [mergeTargetId, setMergeTargetId] = useState("");
+  const [showMergeConfirm, setShowMergeConfirm] = useState(false);
 
   const [headerTitle, setHeaderTitle] = useState("");
   const [headerSubtitle, setHeaderSubtitle] = useState("");
@@ -218,6 +215,10 @@ export default function AdminDashboard() {
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
+
+  const locationSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   );
 
   const [token, setToken] = useState<string | null>(null);
@@ -401,69 +402,6 @@ export default function AdminDashboard() {
     [token]
   );
 
-  const searchLocations = useCallback(async () => {
-    if (!locationSearch.trim()) return;
-    const now = Date.now();
-    if (now - lastSearchRef.current < 500) return;
-    lastSearchRef.current = now;
-    setIsSearchingLocations(true);
-    try {
-      const headers = { Authorization: `Bearer ${token}` };
-      const params = new URLSearchParams({ q: locationSearch });
-      if (locationSearchRegion.trim()) params.set("region", locationSearchRegion.trim());
-      const res = await fetch(`/api/admin/location-search?${params}`, { headers });
-      const data = await res.json();
-      if (res.ok) {
-        setLocationResults(data.results || []);
-      } else {
-        toast.error(data.error || "Location search failed");
-      }
-    } finally {
-      setIsSearchingLocations(false);
-    }
-  }, [locationSearch, locationSearchRegion, token]);
-
-  const saveLocation = useCallback(async () => {
-    if (!editingLocation || !editingLocation.name.trim()) {
-      toast.error("Location name is required");
-      return;
-    }
-    const lat = Number(editingLocation.latitude);
-    const lng = Number(editingLocation.longitude);
-    if (isNaN(lat) || isNaN(lng)) {
-      toast.error("Invalid latitude or longitude");
-      return;
-    }
-    const headers = {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    };
-    const method = editingLocation.id ? "PUT" : "POST";
-    try {
-      const res = await fetch("/api/admin/locations", {
-        method,
-        headers,
-        body: JSON.stringify({
-          id: editingLocation.id || undefined,
-          name: editingLocation.name,
-          address: editingLocation.address || "",
-          latitude: lat,
-          longitude: lng,
-        }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        toast.success(editingLocation.id ? "Location updated" : "Location saved");
-        setEditingLocation(null);
-        fetchData();
-      } else {
-        toast.error(data.error || "Failed to save location");
-      }
-    } catch {
-      toast.error("Network error — could not reach the server");
-    }
-  }, [editingLocation, token]);
-
   const deleteLocation = useCallback(
     async (id: string) => {
       if (!confirm("Delete this location?")) return;
@@ -495,13 +433,8 @@ export default function AdminDashboard() {
     [token]
   );
 
-  const mergeLocations = useCallback(async () => {
-    if (!mergeSource || !mergeTarget) return;
-    if (mergeSource === mergeTarget) {
-      toast.error("Cannot merge a location into itself");
-      return;
-    }
-    setIsMerging(true);
+  const confirmMerge = useCallback(async () => {
+    if (!mergeSourceId || !mergeTargetId) return;
     try {
       const res = await fetch("/api/admin/locations/merge", {
         method: "POST",
@@ -509,24 +442,33 @@ export default function AdminDashboard() {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ sourceId: mergeSource, targetId: mergeTarget }),
+        body: JSON.stringify({ sourceId: mergeSourceId, targetId: mergeTargetId }),
       });
       const data = await res.json();
       if (res.ok) {
         toast.success(`Merged "${data.sourceName}" → "${data.targetName}" (${data.affectedItems} items updated)`);
-        setShowMerge(false);
-        setMergeSource("");
-        setMergeTarget("");
+        setMergeSourceId("");
+        setMergeTargetId("");
+        setShowMergeConfirm(false);
         fetchData();
       } else {
         toast.error(data.error || "Failed to merge locations");
       }
     } catch {
       toast.error("Network error during merge");
-    } finally {
-      setIsMerging(false);
     }
-  }, [mergeSource, mergeTarget, token]);
+  }, [mergeSourceId, mergeTargetId, token]);
+
+  const handleLocationDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      setMergeSourceId(String(active.id));
+      setMergeTargetId(String(over.id));
+      setShowMergeConfirm(true);
+    },
+    []
+  );
 
   const deleteItem = useCallback(
     async (id: string) => {
@@ -748,7 +690,13 @@ export default function AdminDashboard() {
                       locations={locations}
                       longitude={editingLocation?.longitude ?? 141.3544}
                       onPick={(latitude, longitude) => {
-                        setEditingLocation({ id: "", name: "", address: null, latitude, longitude });
+                        setEditingLocation((prev) => {
+                          if (prev) {
+                            toast.success("Coordinates updated — click Update Location to save");
+                            return { ...prev, latitude, longitude };
+                          }
+                          return { id: "", name: "", address: null, latitude, longitude };
+                        });
                         setFlyToKey((k) => k + 1);
                       }}
                       onSelectLocation={(location) => {
@@ -763,7 +711,7 @@ export default function AdminDashboard() {
               </div>
 
               {/* Right: Main Content */}
-              <div className="p-6 pl-3 min-h-0 overflow-y-auto flex flex-col gap-4">
+              <div className="p-6 pl-3 min-h-0 flex flex-col gap-4">
                 {/* Toolbar */}
                 <div className="flex-shrink-0 flex items-center gap-3">
                   <button
@@ -779,210 +727,165 @@ export default function AdminDashboard() {
                     <input
                       value={locationFilter}
                       onChange={(e) => setLocationFilter(e.target.value)}
-                      placeholder="Search locations..."
+                      placeholder="Filter locations..."
                       className="h-10 w-full pl-9 pr-4 rounded-xl border text-sm"
                       style={{ borderColor: "var(--color-border)", background: "var(--color-card)", color: "var(--color-text)" }}
                     />
                   </div>
-                  <div className="flex-1" />
-                  {locations.length >= 2 && (
-                    <button
-                      onClick={() => { setShowMerge(!showMerge); setMergeSource(""); setMergeTarget(""); }}
-                      className={`h-10 px-4 rounded-xl text-sm font-medium transition-colors border ${
-                        showMerge ? "bg-amber-50 dark:bg-amber-900/10 border-amber-300 text-amber-700" : "hover:bg-gray-50 dark:hover:bg-gray-800/30"
-                      }`}
-                      style={showMerge ? {} : { borderColor: "var(--color-border)", color: "var(--color-muted)" }}
-                    >
-                      Merge
-                    </button>
-                  )}
                 </div>
 
-                {/* Merge UI */}
-                {showMerge && (
-                  <div className="flex-shrink-0 p-4 rounded-2xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/30 space-y-2">
-                    <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Merge locations</p>
-                    <div className="flex items-center gap-2">
-                      <select value={mergeSource} onChange={(e) => setMergeSource(e.target.value)} className="flex-1 h-9 px-3 rounded-xl border text-sm bg-white dark:bg-gray-800">
-                        <option value="">Merge this location...</option>
-                        {locations.map((loc) => (<option key={loc.id} value={loc.id}>{loc.name}</option>))}
-                      </select>
-                      <span className="text-amber-600 font-medium flex-shrink-0">→</span>
-                      <select value={mergeTarget} onChange={(e) => setMergeTarget(e.target.value)} className="flex-1 h-9 px-3 rounded-xl border text-sm bg-white dark:bg-gray-800">
-                        <option value="">Into this location...</option>
-                        {locations.map((loc) => (<option key={loc.id} value={loc.id}>{loc.name}</option>))}
-                      </select>
-                    </div>
-                    <div className="flex gap-2">
-                      <button onClick={mergeLocations} disabled={!mergeSource || !mergeTarget || mergeSource === mergeTarget || isMerging} className="h-8 px-4 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium disabled:opacity-50 transition-colors">
-                        {isMerging ? "Merging..." : "Merge"}
-                      </button>
-                      <button onClick={() => { setShowMerge(false); setMergeSource(""); setMergeTarget(""); }} className="h-8 px-4 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-sm">
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
+                {/* Google Maps Search */}
+                <GoogleLocationSearch
+                  token={token}
+                  onSelectResult={(result) => {
+                    setEditingLocation({ id: "", name: result.name, address: result.address, latitude: result.latitude, longitude: result.longitude });
+                  }}
+                />
 
-                {/* Inline Add/Edit Form */}
-                {editingLocation !== null && (
-                  <div className="flex-shrink-0 bg-white dark:bg-gray-900 rounded-2xl border border-[#4285F4]/30 overflow-hidden">
-                    <div className="px-4 py-2.5 bg-[#4285F4]/5 border-b border-[#4285F4]/20 flex items-center justify-between">
-                      <h2 className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>
-                        {editingLocation.id ? "Edit Location" : "Add Location"}
-                      </h2>
-                      <button onClick={() => setEditingLocation(null)} className="text-xs hover:opacity-70" style={{ color: "var(--color-muted)" }}>
-                        Cancel
-                      </button>
-                    </div>
-                    <div className="p-4 space-y-3">
-                      <div className="grid grid-cols-2 gap-3">
-                        <input
-                          value={editingLocation.name}
-                          onChange={(e) => setEditingLocation({ ...editingLocation, name: e.target.value })}
-                          placeholder="Location name"
-                          className="h-9 px-3 rounded-lg border text-sm"
-                          style={{ borderColor: "var(--color-border)", background: "var(--color-card)", color: "var(--color-text)" }}
-                          autoFocus
-                        />
-                        <input
-                          value={editingLocation.address || ""}
-                          onChange={(e) => setEditingLocation({ ...editingLocation, address: e.target.value })}
-                          placeholder="Address"
-                          className="h-9 px-3 rounded-lg border text-sm"
-                          style={{ borderColor: "var(--color-border)", background: "var(--color-card)", color: "var(--color-text)" }}
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <input
-                          type="number" step="any"
-                          value={editingLocation.latitude}
-                          onChange={(e) => setEditingLocation({ ...editingLocation, latitude: Number(e.target.value) })}
-                          placeholder="Latitude"
-                          className="h-9 px-3 rounded-lg border text-sm"
-                          style={{ borderColor: "var(--color-border)", background: "var(--color-card)", color: "var(--color-text)" }}
-                        />
-                        <input
-                          type="number" step="any"
-                          value={editingLocation.longitude}
-                          onChange={(e) => setEditingLocation({ ...editingLocation, longitude: Number(e.target.value) })}
-                          placeholder="Longitude"
-                          className="h-9 px-3 rounded-lg border text-sm"
-                          style={{ borderColor: "var(--color-border)", background: "var(--color-card)", color: "var(--color-text)" }}
-                        />
-                      </div>
-                      {/* Google Maps search */}
-                      <div>
-                        <button onClick={() => setShowSearch(!showSearch)} className="text-xs text-[#4285F4] hover:underline flex items-center gap-1">
-                          {showSearch ? "▾" : "▸"} Search Google Maps
-                        </button>
-                        {showSearch && (
-                          <div className="mt-2 space-y-2">
-                            <div className="flex gap-1.5">
-                              <div className="relative flex-1">
-                                <input
-                                  value={locationSearch}
-                                  onChange={(e) => setLocationSearch(e.target.value)}
-                                  onKeyDown={(e) => { if (e.key === "Enter") searchLocations(); }}
-                                  placeholder="Search..."
-                                  className="h-8 w-full pl-2.5 pr-7 rounded-lg border text-xs"
-                                  style={{ borderColor: "var(--color-border)", background: "var(--color-card)", color: "var(--color-text)" }}
-                                />
-                                {isSearchingLocations && (
-                                  <div className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 border-2 border-[#4285F4] border-t-transparent rounded-full animate-spin" />
-                                )}
-                              </div>
-                              <input
-                                value={locationSearchRegion}
-                                onChange={(e) => setLocationSearchRegion(e.target.value)}
-                                onKeyDown={(e) => { if (e.key === "Enter") searchLocations(); }}
-                                placeholder="Region"
-                                className="h-8 w-24 rounded-lg border text-xs px-2.5"
-                                style={{ borderColor: "var(--color-border)", background: "var(--color-card)", color: "var(--color-text)" }}
-                              />
-                              <button onClick={searchLocations} disabled={isSearchingLocations} className="h-8 w-8 rounded-lg bg-[#4285F4] text-white flex items-center justify-center disabled:opacity-50 flex-shrink-0" aria-label="Search">
-                                <Search className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                            {locationResults.length > 0 && (
-                              <div className="max-h-32 overflow-y-auto rounded-lg border divide-y text-xs" style={{ borderColor: "var(--color-border)" }}>
-                                {locationResults.map((result, i) => (
-                                  <button
-                                    key={`${result.latitude}-${result.longitude}-${i}`}
-                                    onClick={() => setEditingLocation({ ...editingLocation, name: result.name, address: result.address, latitude: result.latitude, longitude: result.longitude })}
-                                    className="w-full px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors"
-                                  >
-                                    <p className="font-medium" style={{ color: "var(--color-text)" }}>{result.name}</p>
-                                    <p className="text-gray-500 truncate">{result.address}</p>
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                      <button
-                        onClick={saveLocation}
-                        disabled={!editingLocation.name.trim()}
-                        className={`w-full h-10 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 ${
-                          editingLocation.id ? "bg-[#4285F4] text-white hover:bg-[#3367d6]" : "bg-[#1a1a1a] text-white hover:bg-[#333]"
-                        }`}
-                      >
-                        {editingLocation.id ? "Update Location" : "Save Location"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Location Cards */}
+                {/* Location Cards with Drag-and-Drop */}
                 <div className="flex-1 min-h-0">
                   {locations.length === 0 ? (
                     <div className="flex items-center justify-center py-20">
                       <div className="text-center">
                         <MapPin className="w-10 h-10 mx-auto mb-3 text-gray-300" />
                         <p className="text-sm font-medium" style={{ color: "var(--color-text)" }}>No locations yet</p>
-                        <p className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>Click the map or "Add Location" to create one</p>
+                        <p className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>Click the map or &quot;Add Location&quot; to create one</p>
                       </div>
                     </div>
                   ) : (
-                    <div className="space-y-1">
-                      {locations.filter((loc) => !locationFilter || loc.name.toLowerCase().includes(locationFilter.toLowerCase())).map((loc) => (
-                        <div
-                          key={loc.id}
-                          onClick={() => { setEditingLocation(loc); setFlyToKey((k) => k + 1); }}
-                          className={`flex items-center gap-4 px-4 py-3 rounded-xl cursor-pointer transition-all border ${
-                            editingLocation?.id === loc.id ? "bg-[#4285F4]/5 border-[#4285F4]/30" : "hover:bg-gray-50 dark:hover:bg-gray-800/30 border-transparent"
-                          }`}
-                        >
-                          <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "var(--color-accent-muted)" }}>
-                            <MapPin className="w-5 h-5" style={{ color: "var(--color-accent)" }} />
+                    <DndContext
+                      sensors={locationSensors}
+                      collisionDetection={closestCenter}
+                      onDragEnd={handleLocationDragEnd}
+                    >
+                      <div className="space-y-1">
+                        {locations.filter((loc) => !locationFilter || loc.name.toLowerCase().includes(locationFilter.toLowerCase())).map((loc) => (
+                          <div
+                            key={loc.id}
+                            onClick={() => { setEditingLocation(loc); setFlyToKey((k) => k + 1); }}
+                            className={`flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all border ${
+                              editingLocation?.id === loc.id
+                                ? "bg-[#4285F4]/5 border-[#4285F4]/30"
+                                : "hover:bg-gray-50 dark:hover:bg-gray-800/30 border-transparent"
+                            }`}
+                          >
+                            <div
+                              onClick={(e) => e.stopPropagation()}
+                              className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 cursor-grab active:cursor-grabbing touch-none flex-shrink-0"
+                              aria-label="Drag to merge"
+                            >
+                              <GripVertical className="w-4 h-4 text-gray-400" />
+                            </div>
+                            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "var(--color-accent-muted)" }}>
+                              <MapPin className="w-4 h-4" style={{ color: "var(--color-accent)" }} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold truncate" style={{ color: "var(--color-text)" }}>{loc.name}</p>
+                              <p className="text-xs truncate" style={{ color: "var(--color-muted)" }}>{loc.address || `${loc.latitude.toFixed(4)}, ${loc.longitude.toFixed(4)}`}</p>
+                            </div>
+                            <div className="flex-shrink-0">
+                              {loc.item_count ? (
+                                <span className={`inline-flex items-center justify-center h-5 min-w-[22px] px-1.5 rounded-full text-[11px] font-semibold ${
+                                  loc.item_count >= 10 ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300"
+                                  : loc.item_count >= 5 ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
+                                  : "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
+                                }`}>{loc.item_count}</span>
+                              ) : <span className="text-xs" style={{ color: "var(--color-muted)" }}>—</span>}
+                            </div>
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setEditingLocation(loc); setFlyToKey((k) => k + 1); }}
+                                className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                                aria-label="Edit"
+                              >
+                                <Pencil className="w-3.5 h-3.5" style={{ color: "var(--color-muted)" }} />
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); deleteLocation(loc.id); }}
+                                className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500 transition-colors"
+                                aria-label="Delete"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold truncate" style={{ color: "var(--color-text)" }}>{loc.name}</p>
-                            <p className="text-xs truncate" style={{ color: "var(--color-muted)" }}>{loc.address || `${loc.latitude.toFixed(4)}, ${loc.longitude.toFixed(4)}`}</p>
-                          </div>
-                          <div className="flex-shrink-0">
-                            {loc.item_count ? (
-                              <span className={`inline-flex items-center justify-center h-5 min-w-[22px] px-1.5 rounded-full text-[11px] font-semibold ${
-                                loc.item_count >= 10 ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300"
-                                : loc.item_count >= 5 ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
-                                : "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
-                              }`}>{loc.item_count}</span>
-                            ) : <span className="text-xs" style={{ color: "var(--color-muted)" }}>—</span>}
-                          </div>
-                          <div className="flex items-center gap-1 flex-shrink-0">
-                            <button onClick={(e) => { e.stopPropagation(); setEditingLocation(loc); setFlyToKey((k) => k + 1); }} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" aria-label="Edit">
-                              <Pencil className="w-3.5 h-3.5" style={{ color: "var(--color-muted)" }} />
-                            </button>
-                            <button onClick={(e) => { e.stopPropagation(); deleteLocation(loc.id); }} className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500 transition-colors" aria-label="Delete">
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                    </DndContext>
                   )}
                 </div>
+
+                {/* Edit Location Dialog */}
+                <EditLocationDialog
+                  open={editingLocation !== null}
+                  onOpenChange={(open) => { if (!open) setEditingLocation(null); }}
+                  location={editingLocation}
+                  onSave={(data) => {
+                    if (!editingLocation) return;
+                    const lat = Number(data.latitude);
+                    const lng = Number(data.longitude);
+                    if (!data.name.trim() || isNaN(lat) || isNaN(lng)) {
+                      toast.error("Location name is required and coordinates must be valid");
+                      return;
+                    }
+                    const headers = {
+                      Authorization: `Bearer ${token}`,
+                      "Content-Type": "application/json",
+                    };
+                    const method = editingLocation.id ? "PUT" : "POST";
+                    fetch("/api/admin/locations", {
+                      method,
+                      headers,
+                      body: JSON.stringify({
+                        id: editingLocation.id || undefined,
+                        name: data.name,
+                        address: data.address || "",
+                        latitude: lat,
+                        longitude: lng,
+                      }),
+                    }).then(async (res) => {
+                      const json = await res.json();
+                      if (res.ok) {
+                        toast.success(editingLocation.id ? "Location updated" : "Location saved");
+                        setEditingLocation(null);
+                        fetchData();
+                      } else {
+                        toast.error(json.error || "Failed to save location");
+                      }
+                    }).catch(() => {
+                      toast.error("Network error — could not reach the server");
+                    });
+                  }}
+                />
+
+                {/* Merge Confirmation Dialog */}
+                <Dialog.Root open={showMergeConfirm} onOpenChange={(open) => { if (!open) { setShowMergeConfirm(false); setMergeSourceId(""); setMergeTargetId(""); } }}>
+                  <Dialog.Portal>
+                    <Dialog.Overlay className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40" />
+                    <Dialog.Content className="fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-amber-300 dark:border-amber-700">
+                      <div className="p-5 space-y-4">
+                        <div>
+                          <Dialog.Title className="text-sm font-semibold text-amber-800 dark:text-amber-300">Merge Locations</Dialog.Title>
+                          <Dialog.Description className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>
+                            {(() => {
+                              const source = locations.find((l) => l.id === mergeSourceId);
+                              const target = locations.find((l) => l.id === mergeTargetId);
+                              return source && target ? `Merge "${source.name}" into "${target.name}"? All items will be moved. This cannot be undone.` : "Confirm merge?";
+                            })()}
+                          </Dialog.Description>
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={confirmMerge} className="flex-1 h-9 rounded-lg text-sm font-medium bg-amber-600 text-white hover:bg-amber-700 transition-colors">
+                            Confirm Merge
+                          </button>
+                          <button onClick={() => { setShowMergeConfirm(false); setMergeSourceId(""); setMergeTargetId(""); }} className="flex-1 h-9 rounded-lg text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors" style={{ color: "var(--color-text)" }}>
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    </Dialog.Content>
+                  </Dialog.Portal>
+                </Dialog.Root>
               </div>
             </div>
           </>
