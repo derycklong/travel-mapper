@@ -40,17 +40,19 @@ export function EditLocationDialog({
     e.preventDefault();
     if (!canSave) return;
 
-    if ((latitude !== "" && isNaN(parseFloat(latitude))) || (longitude !== "" && isNaN(parseFloat(longitude)))) {
-      setCoordError("Invalid coordinates");
+    const lat = parseFloat(latitude) || 0;
+    const lng = parseFloat(longitude) || 0;
+
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      setCoordError("Latitude must be -90 to 90, longitude -180 to 180");
       return;
     }
-    setCoordError(null);
 
     onSave({
       name: name.trim(),
       address: address.trim(),
-      latitude: parseFloat(latitude) || 0,
-      longitude: parseFloat(longitude) || 0,
+      latitude: lat,
+      longitude: lng,
     });
   };
 
