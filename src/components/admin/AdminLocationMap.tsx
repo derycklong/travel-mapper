@@ -154,7 +154,7 @@ export function AdminLocationMap({
         zoomControl={false}
         attributionControl={false}
       >
-        <TileLayer url="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png" tileSize={256} />
+        <TileLayer url="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png" tileSize={256} keepBuffer={6} />
 
         <MapController
           latitude={latitude}
