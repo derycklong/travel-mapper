@@ -21,7 +21,7 @@ function isValidLatLng(v: unknown): v is number {
   return typeof v === "number" && isFinite(v);
 }
 
-function hasLocation(item: ItineraryItem): boolean {
+function hasLocation(item: ItineraryItem): item is ItineraryItem & { latitude: number; longitude: number } {
   return !!item.location_id && isValidLatLng(item.latitude) && isValidLatLng(item.longitude);
 }
 
@@ -102,8 +102,10 @@ function findNearestItem(
   let bestDist = Infinity;
   const tapPoint = map.latLngToContainerPoint(latlng);
   for (const item of items) {
-    if (!isValidLatLng(item.latitude) || !isValidLatLng(item.longitude)) continue;
-    const markerPoint = map.latLngToContainerPoint([item.latitude, item.longitude]);
+    const lat = item.latitude;
+    const lng = item.longitude;
+    if (!isValidLatLng(lat) || !isValidLatLng(lng)) continue;
+    const markerPoint = map.latLngToContainerPoint([lat, lng]);
     const d = tapPoint.distanceTo(markerPoint);
     if (d < bestDist) { bestDist = d; best = item; }
   }
@@ -216,7 +218,13 @@ function MapController({
     hasFitInitial.current = true;
     try {
       const bounds = L.latLngBounds(validItems.map((i) => [i.latitude, i.longitude] as [number, number]));
-      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 9 });
+      const isDesktop = window.innerWidth >= 1024;
+      const leftPad = isDesktop ? 420 : 40;
+      map.fitBounds(bounds, {
+        paddingTopLeft: [leftPad, 40],
+        paddingBottomRight: [40, 40],
+        maxZoom: 9,
+      });
     } catch (err) {
       console.error("[Map] initial fitBounds error:", err);
     }
@@ -228,7 +236,13 @@ function MapController({
       const bounds = L.latLngBounds(allItems
         .filter((i) => isValidLatLng(i.latitude) && isValidLatLng(i.longitude))
         .map((i) => [i.latitude, i.longitude] as [number, number]));
-      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+      const isDesktop = window.innerWidth >= 1024;
+      const leftPad = isDesktop ? 420 : 40;
+      map.fitBounds(bounds, {
+        paddingTopLeft: [leftPad, 40],
+        paddingBottomRight: [40, 40],
+        maxZoom: 14,
+      });
     } catch (err) {
       console.error("[Map] fitBounds error:", err);
     }
@@ -244,20 +258,31 @@ function MapController({
     if (!item) return;
     if (!hasLocation(item)) return;
     const target = L.latLng(item.latitude, item.longitude);
-    const center = map.getCenter();
-    const pixelDist = map.latLngToContainerPoint(center).distanceTo(
-      map.latLngToContainerPoint(target)
-    );
-    // On mobile, delay to let Vaul drawer close animation finish before centering
-    const delay = window.innerWidth < 1024 ? 300 : 0;
+    const isDesktop = window.innerWidth >= 1024;
+    // Panel: left-4 (16px) + width (400px) = 416px obscured on left; offset by half = 208px
+    const panelOffsetPx = isDesktop ? 208 : 0;
+    const delay = isDesktop ? 0 : 300;
     const timer = setTimeout(() => {
       try {
         map.invalidateSize({ pan: false });
-        if (pixelDist < 10) {
-          // Already very close — skip animation to avoid vibration
-          map.setView(target, 16, { animate: false });
+        if (panelOffsetPx) {
+          // Desktop: shift center left so the marker appears centered in the visible area (right of panel)
+          // Use CRS projection at target zoom so the pixel offset is correct
+          const targetPoint = L.CRS.EPSG3857.latLngToPoint(target, 16);
+          const offsetPoint = L.point(targetPoint.x - panelOffsetPx, targetPoint.y);
+          const offsetCenter = L.CRS.EPSG3857.pointToLatLng(offsetPoint, 16);
+          map.flyTo(offsetCenter, 16, { duration: 1 });
         } else {
-          map.flyTo(target, 16, { duration: 1 });
+          // Mobile: no panel offset
+          const center = map.getCenter();
+          const pixelDist = map.latLngToContainerPoint(center).distanceTo(
+            map.latLngToContainerPoint(target)
+          );
+          if (pixelDist < 10) {
+            map.setView(target, 16, { animate: false });
+          } else {
+            map.flyTo(target, 16, { duration: 1 });
+          }
         }
       } catch {}
     }, delay);
@@ -428,6 +453,14 @@ function PlacePopupContent({ popupItem, displayDayIndex, item, group, allItems, 
           >
             Google Maps
           </a>
+          {popupItem.google_route_url && (
+            <a
+              href={popupItem.google_route_url} target="_blank" rel="noopener noreferrer"
+              style={{ fontSize: 11, fontWeight: 500, color: "var(--color-accent)", textDecoration: "none" }}
+            >
+              Google Route
+            </a>
+          )}
           {place?.website && (
             <a
               href={place.website} target="_blank" rel="noopener noreferrer"
@@ -485,7 +518,7 @@ function ItineraryMarker({
 }) {
   const markerRef = useRef<L.Marker | null>(null);
   const map = useMap();
-  const item = group.items[0];
+  const item = group.items[0] as ItineraryItem & { latitude: number; longitude: number };
   const locKey = `${item.latitude}-${item.longitude}`;
   const isSelected = group.items.some((i) => i.id === selectedItemId);
   const isHovered = group.items.some((i) => i.id === hoveredItemId);

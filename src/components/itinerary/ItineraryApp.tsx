@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { useItineraryStore } from "@/store/itinerary";
 import { HeroSection } from "./HeroSection";
@@ -25,6 +25,45 @@ export function ItineraryApp({ initialDays, tripTitle, tripSubtitle }: Itinerary
   const [panelOpen, setPanelOpen] = useState(false);
   const prevDesktop = useRef(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const touchStartX = useRef(0);
+  const touchStartY = useRef(0);
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+  }, []);
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    const deltaX = e.changedTouches[0].clientX - touchStartX.current;
+    const deltaY = e.changedTouches[0].clientY - touchStartY.current;
+
+    // Only handle horizontal swipes (dominant axis + minimum distance)
+    if (Math.abs(deltaX) < Math.abs(deltaY) || Math.abs(deltaX) < 50) return;
+
+    const { days, activeDayFilter, setDayFilter } = useItineraryStore.getState();
+    const totalDays = days.length;
+    if (totalDays === 0) return;
+
+    if (deltaX < 0) {
+      // Swipe left → next day
+      if (activeDayFilter === null) {
+        setDayFilter(0);
+      } else if (activeDayFilter < totalDays - 1) {
+        setDayFilter(activeDayFilter + 1);
+      } else {
+        setDayFilter(null); // wrap to All Days
+      }
+    } else {
+      // Swipe right → previous day
+      if (activeDayFilter === null) {
+        setDayFilter(totalDays - 1); // wrap to last day
+      } else if (activeDayFilter > 0) {
+        setDayFilter(activeDayFilter - 1);
+      } else {
+        setDayFilter(null); // wrap to All Days
+      }
+    }
+  }, []);
 
   useEffect(() => {
     useItineraryStore.setState({
@@ -170,6 +209,8 @@ export function ItineraryApp({ initialDays, tripTitle, tripSubtitle }: Itinerary
                 onScroll={(e) => {
                   sessionStorage.setItem("drawer-scroll", String(e.currentTarget.scrollTop));
                 }}
+                onTouchStart={handleTouchStart}
+                onTouchEnd={handleTouchEnd}
                 className="flex-1 min-h-0 overflow-y-auto px-1 pb-6"
               >
                 <DayTimeline days={initialDays} onItemSelect={() => setPanelOpen(false)} />

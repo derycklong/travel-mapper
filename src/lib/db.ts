@@ -69,7 +69,7 @@ db.exec(`
 
 const itemColumns = db
   .prepare("PRAGMA table_info(itinerary_items)")
-  .all() as { name: string }[];
+  .all() as { name: string; notnull: number }[];
 
 if (!itemColumns.some((column) => column.name === "location_id")) {
   db.prepare("ALTER TABLE itinerary_items ADD COLUMN location_id TEXT").run();
@@ -78,6 +78,52 @@ if (!itemColumns.some((column) => column.name === "location_id")) {
 
 if (!itemColumns.some((column) => column.name === "google_maps_url")) {
   db.prepare("ALTER TABLE itinerary_items ADD COLUMN google_maps_url TEXT").run();
+}
+
+if (!itemColumns.some((column) => column.name === "google_route_url")) {
+  db.prepare("ALTER TABLE itinerary_items ADD COLUMN google_route_url TEXT").run();
+}
+
+// Make latitude/longitude nullable — SQLite can't ALTER COLUMN, so recreate table
+const latCol = itemColumns.find((c) => c.name === "latitude");
+const lngCol = itemColumns.find((c) => c.name === "longitude");
+if (latCol?.notnull || lngCol?.notnull) {
+  db.exec(`
+    CREATE TABLE itinerary_items_v2 (
+      id TEXT PRIMARY KEY,
+      day_id TEXT NOT NULL REFERENCES itinerary_days(id) ON DELETE CASCADE,
+      location_id TEXT,
+      start_time TEXT NOT NULL,
+      end_time TEXT,
+      activity TEXT NOT NULL,
+      description TEXT,
+      latitude REAL,
+      longitude REAL,
+      location_name TEXT NOT NULL DEFAULT '',
+      notes TEXT,
+      google_maps_url TEXT,
+      google_route_url TEXT,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    INSERT INTO itinerary_items_v2 (
+      id, day_id, location_id, start_time, end_time, activity, description,
+      latitude, longitude, location_name, notes, google_maps_url, google_route_url,
+      sort_order, created_at
+    )
+    SELECT
+      id, day_id, location_id, start_time, end_time, activity, description,
+      CASE WHEN location_id IS NULL THEN NULL ELSE latitude END,
+      CASE WHEN location_id IS NULL THEN NULL ELSE longitude END,
+      location_name, notes, google_maps_url, google_route_url,
+      sort_order, created_at
+    FROM itinerary_items;
+    DROP TABLE itinerary_items;
+    ALTER TABLE itinerary_items_v2 RENAME TO itinerary_items;
+    CREATE INDEX IF NOT EXISTS idx_items_day_id ON itinerary_items(day_id);
+    CREATE INDEX IF NOT EXISTS idx_items_sort ON itinerary_items(sort_order);
+    CREATE INDEX IF NOT EXISTS idx_items_location_id ON itinerary_items(location_id);
+  `);
 }
 
 // Cache tables for Google Places API cost reduction

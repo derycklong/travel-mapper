@@ -191,21 +191,10 @@ export default function AdminDashboard() {
     location_id: "",
     description: "",
     notes: "",
+    google_route_url: "",
     sort_order: 0,
   });
 
-  const [locationForm, setLocationForm] = useState({
-    id: "",
-    name: "",
-    address: "",
-    latitude: 43.0621,
-    longitude: 141.3544,
-  });
-  const [locationSearch, setLocationSearch] = useState("");
-  const [locationSearchRegion, setLocationSearchRegion] = useState("");
-  const [locationResults, setLocationResults] = useState<LocationSearchResult[]>([]);
-  const [isSearchingLocations, setIsSearchingLocations] = useState(false);
-  const lastSearchRef = useRef(0);
   const [locationFilter, setLocationFilter] = useState("");
   const [flyToKey, setFlyToKey] = useState(0);
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -213,6 +202,13 @@ export default function AdminDashboard() {
   const [mergeSource, setMergeSource] = useState("");
   const [mergeTarget, setMergeTarget] = useState("");
   const [isMerging, setIsMerging] = useState(false);
+  const [editingLocation, setEditingLocation] = useState<Location | null>(null);
+  const [locationSearch, setLocationSearch] = useState("");
+  const [locationSearchRegion, setLocationSearchRegion] = useState("");
+  const [locationResults, setLocationResults] = useState<LocationSearchResult[]>([]);
+  const [isSearchingLocations, setIsSearchingLocations] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const lastSearchRef = useRef(0);
 
   const [headerTitle, setHeaderTitle] = useState("");
   const [headerSubtitle, setHeaderSubtitle] = useState("");
@@ -224,15 +220,19 @@ export default function AdminDashboard() {
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
 
-  const token =
-    typeof window !== "undefined" ? localStorage.getItem("admin_token") : null;
+  const [token, setToken] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!token) {
-      router.push("/admin/login");
-      return;
+    const stored = localStorage.getItem("admin_token");
+    if (stored) {
+      setToken(stored);
     }
-    fetchData();
+  }, []);
+
+  useEffect(() => {
+    if (token) {
+      fetchData();
+    }
   }, [token]);
 
   // Sync theme state with document
@@ -249,6 +249,7 @@ export default function AdminDashboard() {
   }, []);
 
   async function fetchData() {
+    if (!token) return;
     const headers = { Authorization: `Bearer ${token}` };
 
     try {
@@ -261,7 +262,8 @@ export default function AdminDashboard() {
 
       if (daysRes.status === 401 || itemsRes.status === 401 || locationsRes.status === 401) {
         localStorage.removeItem("admin_token");
-        router.push("/admin/login");
+        document.cookie = "admin_token=; path=/; max-age=0";
+        setToken(null);
         return;
       }
 
@@ -409,10 +411,7 @@ export default function AdminDashboard() {
       const headers = { Authorization: `Bearer ${token}` };
       const params = new URLSearchParams({ q: locationSearch });
       if (locationSearchRegion.trim()) params.set("region", locationSearchRegion.trim());
-      const res = await fetch(
-        `/api/admin/location-search?${params}`,
-        { headers }
-      );
+      const res = await fetch(`/api/admin/location-search?${params}`, { headers });
       const data = await res.json();
       if (res.ok) {
         setLocationResults(data.results || []);
@@ -425,73 +424,45 @@ export default function AdminDashboard() {
   }, [locationSearch, locationSearchRegion, token]);
 
   const saveLocation = useCallback(async () => {
-    if (!locationForm.name.trim()) {
+    if (!editingLocation || !editingLocation.name.trim()) {
       toast.error("Location name is required");
       return;
     }
-
-    const lat = Number(locationForm.latitude);
-    const lng = Number(locationForm.longitude);
+    const lat = Number(editingLocation.latitude);
+    const lng = Number(editingLocation.longitude);
     if (isNaN(lat) || isNaN(lng)) {
       toast.error("Invalid latitude or longitude");
       return;
     }
-
     const headers = {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     };
-    const method = locationForm.id ? "PUT" : "POST";
-    let res: Response;
+    const method = editingLocation.id ? "PUT" : "POST";
     try {
-      res = await fetch("/api/admin/locations", {
+      const res = await fetch("/api/admin/locations", {
         method,
         headers,
         body: JSON.stringify({
-          id: locationForm.id || undefined,
-          name: locationForm.name,
-          address: locationForm.address,
+          id: editingLocation.id || undefined,
+          name: editingLocation.name,
+          address: editingLocation.address || "",
           latitude: lat,
           longitude: lng,
         }),
       });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success(editingLocation.id ? "Location updated" : "Location saved");
+        setEditingLocation(null);
+        fetchData();
+      } else {
+        toast.error(data.error || "Failed to save location");
+      }
     } catch {
       toast.error("Network error — could not reach the server");
-      return;
     }
-
-    let data: { error?: string };
-    try {
-      data = await res.json();
-    } catch {
-      toast.error("Server returned an invalid response");
-      return;
-    }
-
-    if (res.ok) {
-      toast.success(locationForm.id ? "Location updated" : "Location saved");
-      if (locationForm.id) {
-        setLocations((prev) =>
-          prev.map((loc) =>
-            loc.id === locationForm.id
-              ? { ...loc, latitude: lat, longitude: lng, name: locationForm.name.trim(), address: locationForm.address }
-              : loc
-          )
-        );
-      }
-      setLocationForm({
-        id: "",
-        name: "",
-        address: "",
-        latitude: 43.0621,
-        longitude: 141.3544,
-      });
-      setLocationResults([]);
-      fetchData();
-    } else {
-      toast.error(data.error || "Failed to save location");
-    }
-  }, [locationForm, token]);
+  }, [editingLocation, token]);
 
   const deleteLocation = useCallback(
     async (id: string) => {
@@ -675,10 +646,12 @@ export default function AdminDashboard() {
 
   function logout() {
     localStorage.removeItem("admin_token");
-    router.push("/admin/login");
+    document.cookie = "admin_token=; path=/; max-age=0";
+    setToken(null);
+    router.replace("/admin/login");
   }
 
-  if (isLoading) {
+  if (isLoading || !token) {
     return (
       <div className="h-screen flex items-center justify-center">
         <p className="text-sm text-gray-400">Loading admin...</p>
@@ -761,322 +734,258 @@ export default function AdminDashboard() {
 
       <div className={`flex-1 w-full min-h-0 ${activeScreen !== "locations" ? "overflow-y-auto px-4 sm:px-6 py-6 max-w-6xl mx-auto space-y-5" : "overflow-hidden"}`}>
         {activeScreen === "locations" ? (
-          <div className="grid h-full grid-cols-[minmax(0,1fr)_minmax(360px,520px)] gap-6 p-6">
-            {/* Map */}
-            <div className="bg-white dark:bg-gray-900 rounded-2xl border border-[var(--color-border)] overflow-hidden flex-1 min-w-0 flex flex-col min-h-0">
-              <div className="px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 flex-shrink-0">
-                <h2 className="font-medium text-xs">Map  <span className="text-gray-400 font-normal">· Click to set coordinates</span></h2>
+          <>
+            <div className="grid grid-cols-2 h-full">
+              {/* Left: Map */}
+              <div className="p-6 pr-3 min-h-0">
+                <div className="h-full bg-white dark:bg-gray-900 rounded-2xl border border-[var(--color-border)] overflow-hidden flex flex-col">
+                  <div className="px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 flex-shrink-0">
+                    <h2 className="font-medium text-xs">Map  <span className="text-gray-400 font-normal">· Click to set coordinates</span></h2>
+                  </div>
+                  <div className="relative flex-1 min-h-0">
+                    <AdminLocationMap
+                      latitude={editingLocation?.latitude ?? 43.0621}
+                      locations={locations}
+                      longitude={editingLocation?.longitude ?? 141.3544}
+                      onPick={(latitude, longitude) => {
+                        setEditingLocation({ id: "", name: "", address: null, latitude, longitude });
+                        setFlyToKey((k) => k + 1);
+                      }}
+                      onSelectLocation={(location) => {
+                        setEditingLocation(location);
+                        setFlyToKey((k) => k + 1);
+                      }}
+                      selectedLocationId={editingLocation?.id || ""}
+                      flyToKey={flyToKey}
+                    />
+                  </div>
+                </div>
               </div>
-              <div className="relative flex-1 min-h-0">
-                <AdminLocationMap
-                  latitude={locationForm.latitude}
-                  locations={locations}
-                  longitude={locationForm.longitude}
-                  onPick={(latitude, longitude) =>
-                    setLocationForm((current) => ({
-                      ...current,
-                      latitude,
-                      longitude,
-                    }))
-                  }
-                  onSelectLocation={(location) => {
-                    setLocationForm({
-                      id: location.id,
-                      name: location.name,
-                      address: location.address || "",
-                      latitude: location.latitude,
-                      longitude: location.longitude,
-                    });
-                    setFlyToKey((k) => k + 1);
-                  }}
-                  selectedLocationId={locationForm.id}
-                  flyToKey={flyToKey}
-                />
-              </div>
-            </div>
 
-            {/* Right panel: single scrollable column */}
-            <div className="flex flex-col min-w-0 min-h-0">
-              <div className={`bg-white dark:bg-gray-900 rounded-2xl border overflow-hidden flex flex-col flex-1 min-h-0 ${
-                locationForm.id
-                  ? "border-[#4285F4]/40 ring-1 ring-[#4285F4]/20"
-                  : "border-[var(--color-border)]"
-              }`}>
-                {/* Header */}
-                <div className={`px-4 py-2.5 border-b flex items-center justify-between ${
-                  locationForm.id
-                    ? "bg-[#4285F4]/5 border-[#4285F4]/20"
-                    : "bg-gray-50 dark:bg-gray-800/50 border-[var(--color-border)]"
-                }`}>
-                  <h2 className="text-xs font-medium">
-                    {locationForm.id ? (
-                      <span className="flex items-center gap-1.5">
-                        <Pencil className="w-3 h-3 text-[#4285F4]" />
-                        Edit Location
-                      </span>
-                    ) : "New Location"}
-                  </h2>
-                  {locationForm.id && (
+              {/* Right: Main Content */}
+              <div className="p-6 pl-3 min-h-0 overflow-y-auto flex flex-col gap-4">
+                {/* Toolbar */}
+                <div className="flex-shrink-0 flex items-center gap-3">
+                  <button
+                    onClick={() => setEditingLocation({ id: "", name: "", address: null, latitude: 43.0621, longitude: 141.3544 })}
+                    className="h-10 px-4 rounded-xl text-sm font-semibold text-white flex items-center gap-2 transition-colors hover:opacity-90"
+                    style={{ background: "var(--color-accent)" }}
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add Location
+                  </button>
+                  <div className="relative flex-1 max-w-xs">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                      value={locationFilter}
+                      onChange={(e) => setLocationFilter(e.target.value)}
+                      placeholder="Search locations..."
+                      className="h-10 w-full pl-9 pr-4 rounded-xl border text-sm"
+                      style={{ borderColor: "var(--color-border)", background: "var(--color-card)", color: "var(--color-text)" }}
+                    />
+                  </div>
+                  <div className="flex-1" />
+                  {locations.length >= 2 && (
                     <button
-                      onClick={() =>
-                        setLocationForm({
-                          id: "", name: "", address: "",
-                          latitude: 43.0621, longitude: 141.3544,
-                        })
-                      }
-                      className="text-[11px] text-gray-500 hover:text-gray-700 underline"
+                      onClick={() => { setShowMerge(!showMerge); setMergeSource(""); setMergeTarget(""); }}
+                      className={`h-10 px-4 rounded-xl text-sm font-medium transition-colors border ${
+                        showMerge ? "bg-amber-50 dark:bg-amber-900/10 border-amber-300 text-amber-700" : "hover:bg-gray-50 dark:hover:bg-gray-800/30"
+                      }`}
+                      style={showMerge ? {} : { borderColor: "var(--color-border)", color: "var(--color-muted)" }}
                     >
-                      Cancel
+                      Merge
                     </button>
                   )}
                 </div>
 
-                <div className="flex flex-col flex-1 min-h-0">
-                  {/* Fixed: search + form */}
-                  <div className="flex-shrink-0 p-3 space-y-3">
-                    {/* Search */}
-                    <div className="flex gap-1.5">
-                      <div className="relative flex-1">
-                        <input
-                          value={locationSearch}
-                          onChange={(e) => setLocationSearch(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter") searchLocations(); }}
-                          placeholder="Search Google Maps..."
-                          className="h-8 w-full pl-2.5 pr-7 rounded-lg border text-xs"
-                        />
-                        {isSearchingLocations && (
-                          <div className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 border-2 border-[#4285F4] border-t-transparent rounded-full animate-spin" />
-                        )}
-                      </div>
-                      <input
-                        value={locationSearchRegion}
-                        onChange={(e) => setLocationSearchRegion(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter") searchLocations(); }}
-                        placeholder="Region (e.g. Japan or JP)"
-                        className="h-8 w-24 rounded-lg border text-xs px-2.5"
-                      />
-                      <button
-                        onClick={searchLocations}
-                        disabled={isSearchingLocations}
-                        className="h-8 w-8 rounded-lg bg-[#4285F4] text-white flex items-center justify-center disabled:opacity-50 flex-shrink-0"
-                        aria-label="Search"
-                      >
-                        <Search className="w-3.5 h-3.5" />
+                {/* Merge UI */}
+                {showMerge && (
+                  <div className="flex-shrink-0 p-4 rounded-2xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/30 space-y-2">
+                    <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Merge locations</p>
+                    <div className="flex items-center gap-2">
+                      <select value={mergeSource} onChange={(e) => setMergeSource(e.target.value)} className="flex-1 h-9 px-3 rounded-xl border text-sm bg-white dark:bg-gray-800">
+                        <option value="">Merge this location...</option>
+                        {locations.map((loc) => (<option key={loc.id} value={loc.id}>{loc.name}</option>))}
+                      </select>
+                      <span className="text-amber-600 font-medium flex-shrink-0">→</span>
+                      <select value={mergeTarget} onChange={(e) => setMergeTarget(e.target.value)} className="flex-1 h-9 px-3 rounded-xl border text-sm bg-white dark:bg-gray-800">
+                        <option value="">Into this location...</option>
+                        {locations.map((loc) => (<option key={loc.id} value={loc.id}>{loc.name}</option>))}
+                      </select>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={mergeLocations} disabled={!mergeSource || !mergeTarget || mergeSource === mergeTarget || isMerging} className="h-8 px-4 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium disabled:opacity-50 transition-colors">
+                        {isMerging ? "Merging..." : "Merge"}
+                      </button>
+                      <button onClick={() => { setShowMerge(false); setMergeSource(""); setMergeTarget(""); }} className="h-8 px-4 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-sm">
+                        Cancel
                       </button>
                     </div>
+                  </div>
+                )}
 
-                    {locationResults.length > 0 && (
-                      <div className="max-h-32 overflow-y-auto rounded-lg border divide-y text-xs">
-                        {locationResults.map((result, i) => (
-                          <button
-                            key={`${result.latitude}-${result.longitude}-${i}`}
-                            onClick={() =>
-                              setLocationForm((current) => ({
-                                ...current,
-                                name: result.name,
-                                address: result.address,
-                                latitude: result.latitude,
-                                longitude: result.longitude,
-                              }))
-                            }
-                            className="w-full px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-                          >
-                            <p className="font-medium">{result.name}</p>
-                            <p className="text-gray-500 truncate">{result.address}</p>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Form fields */}
-                    <div className="space-y-2">
-                      <div className="grid grid-cols-2 gap-1.5">
+                {/* Inline Add/Edit Form */}
+                {editingLocation !== null && (
+                  <div className="flex-shrink-0 bg-white dark:bg-gray-900 rounded-2xl border border-[#4285F4]/30 overflow-hidden">
+                    <div className="px-4 py-2.5 bg-[#4285F4]/5 border-b border-[#4285F4]/20 flex items-center justify-between">
+                      <h2 className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>
+                        {editingLocation.id ? "Edit Location" : "Add Location"}
+                      </h2>
+                      <button onClick={() => setEditingLocation(null)} className="text-xs hover:opacity-70" style={{ color: "var(--color-muted)" }}>
+                        Cancel
+                      </button>
+                    </div>
+                    <div className="p-4 space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
                         <input
-                          value={locationForm.name}
-                          onChange={(e) => setLocationForm({ ...locationForm, name: e.target.value })}
+                          value={editingLocation.name}
+                          onChange={(e) => setEditingLocation({ ...editingLocation, name: e.target.value })}
                           placeholder="Location name"
-                          className="h-8 px-2.5 rounded-lg border text-xs"
+                          className="h-9 px-3 rounded-lg border text-sm"
+                          style={{ borderColor: "var(--color-border)", background: "var(--color-card)", color: "var(--color-text)" }}
+                          autoFocus
                         />
                         <input
-                          value={locationForm.address}
-                          onChange={(e) => setLocationForm({ ...locationForm, address: e.target.value })}
+                          value={editingLocation.address || ""}
+                          onChange={(e) => setEditingLocation({ ...editingLocation, address: e.target.value })}
                           placeholder="Address"
-                          className="h-8 px-2.5 rounded-lg border text-xs"
+                          className="h-9 px-3 rounded-lg border text-sm"
+                          style={{ borderColor: "var(--color-border)", background: "var(--color-card)", color: "var(--color-text)" }}
                         />
                       </div>
-                      <div className="grid grid-cols-2 gap-1.5">
+                      <div className="grid grid-cols-2 gap-3">
                         <input
                           type="number" step="any"
-                          value={locationForm.latitude}
-                          onChange={(e) => setLocationForm({ ...locationForm, latitude: Number(e.target.value) })}
+                          value={editingLocation.latitude}
+                          onChange={(e) => setEditingLocation({ ...editingLocation, latitude: Number(e.target.value) })}
                           placeholder="Latitude"
-                          className="h-8 px-2.5 rounded-lg border text-[11px]"
+                          className="h-9 px-3 rounded-lg border text-sm"
+                          style={{ borderColor: "var(--color-border)", background: "var(--color-card)", color: "var(--color-text)" }}
                         />
                         <input
                           type="number" step="any"
-                          value={locationForm.longitude}
-                          onChange={(e) => setLocationForm({ ...locationForm, longitude: Number(e.target.value) })}
+                          value={editingLocation.longitude}
+                          onChange={(e) => setEditingLocation({ ...editingLocation, longitude: Number(e.target.value) })}
                           placeholder="Longitude"
-                          className="h-8 px-2.5 rounded-lg border text-[11px]"
+                          className="h-9 px-3 rounded-lg border text-sm"
+                          style={{ borderColor: "var(--color-border)", background: "var(--color-card)", color: "var(--color-text)" }}
                         />
+                      </div>
+                      {/* Google Maps search */}
+                      <div>
+                        <button onClick={() => setShowSearch(!showSearch)} className="text-xs text-[#4285F4] hover:underline flex items-center gap-1">
+                          {showSearch ? "▾" : "▸"} Search Google Maps
+                        </button>
+                        {showSearch && (
+                          <div className="mt-2 space-y-2">
+                            <div className="flex gap-1.5">
+                              <div className="relative flex-1">
+                                <input
+                                  value={locationSearch}
+                                  onChange={(e) => setLocationSearch(e.target.value)}
+                                  onKeyDown={(e) => { if (e.key === "Enter") searchLocations(); }}
+                                  placeholder="Search..."
+                                  className="h-8 w-full pl-2.5 pr-7 rounded-lg border text-xs"
+                                  style={{ borderColor: "var(--color-border)", background: "var(--color-card)", color: "var(--color-text)" }}
+                                />
+                                {isSearchingLocations && (
+                                  <div className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 border-2 border-[#4285F4] border-t-transparent rounded-full animate-spin" />
+                                )}
+                              </div>
+                              <input
+                                value={locationSearchRegion}
+                                onChange={(e) => setLocationSearchRegion(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === "Enter") searchLocations(); }}
+                                placeholder="Region"
+                                className="h-8 w-24 rounded-lg border text-xs px-2.5"
+                                style={{ borderColor: "var(--color-border)", background: "var(--color-card)", color: "var(--color-text)" }}
+                              />
+                              <button onClick={searchLocations} disabled={isSearchingLocations} className="h-8 w-8 rounded-lg bg-[#4285F4] text-white flex items-center justify-center disabled:opacity-50 flex-shrink-0" aria-label="Search">
+                                <Search className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                            {locationResults.length > 0 && (
+                              <div className="max-h-32 overflow-y-auto rounded-lg border divide-y text-xs" style={{ borderColor: "var(--color-border)" }}>
+                                {locationResults.map((result, i) => (
+                                  <button
+                                    key={`${result.latitude}-${result.longitude}-${i}`}
+                                    onClick={() => setEditingLocation({ ...editingLocation, name: result.name, address: result.address, latitude: result.latitude, longitude: result.longitude })}
+                                    className="w-full px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors"
+                                  >
+                                    <p className="font-medium" style={{ color: "var(--color-text)" }}>{result.name}</p>
+                                    <p className="text-gray-500 truncate">{result.address}</p>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                       <button
                         onClick={saveLocation}
-                        disabled={!locationForm.name.trim()}
-                        className={`w-full h-8 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 ${
-                          locationForm.id
-                            ? "bg-[#4285F4] text-white hover:bg-[#3367d6]"
-                            : "bg-[#1a1a1a] text-white hover:bg-[#333]"
+                        disabled={!editingLocation.name.trim()}
+                        className={`w-full h-10 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 ${
+                          editingLocation.id ? "bg-[#4285F4] text-white hover:bg-[#3367d6]" : "bg-[#1a1a1a] text-white hover:bg-[#333]"
                         }`}
                       >
-                        {locationForm.id ? "Update Location" : "Save Location"}
+                        {editingLocation.id ? "Update Location" : "Save Location"}
                       </button>
                     </div>
                   </div>
+                )}
 
-                  <div className="h-px bg-[var(--color-border)] mx-3" />
-
-                  {/* Scrollable: saved locations list */}
-                  <div className="flex-1 overflow-y-auto px-3 pb-3">
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <h3 className="text-xs font-medium text-gray-500">Saved ({locations.length})</h3>
-                          {locations.length >= 2 && (
-                            <button
-                              onClick={() => { setShowMerge(!showMerge); setMergeSource(""); setMergeTarget(""); }}
-                              className={`text-[11px] underline ${showMerge ? "text-amber-700" : "text-amber-600 hover:text-amber-700"}`}
-                            >
-                              Merge
-                            </button>
-                          )}
-                        </div>
-                        <div className="relative w-36">
-                          <input
-                            value={locationFilter}
-                            onChange={(e) => setLocationFilter(e.target.value)}
-                            placeholder="Filter..."
-                            className="h-6 w-full pl-5 pr-2 rounded border text-[10px]"
-                          />
-                          <Search className="w-2.5 h-2.5 absolute left-1.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                        </div>
-                      </div>
-
-                      {showMerge && (
-                        <div className="mb-3 p-2.5 rounded-lg bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/30 space-y-2">
-                          <p className="text-xs font-medium text-amber-800 dark:text-amber-300">Merge locations</p>
-                          <div className="flex items-center gap-1.5">
-                            <select
-                              value={mergeSource}
-                              onChange={(e) => setMergeSource(e.target.value)}
-                              className="flex-1 h-8 px-2 rounded border text-xs bg-white dark:bg-gray-800"
-                            >
-                              <option value="">Merge this location...</option>
-                              {locations.map((loc) => (
-                                <option key={loc.id} value={loc.id}>{loc.name}</option>
-                              ))}
-                            </select>
-                            <span className="text-xs text-amber-600 font-medium">→</span>
-                            <select
-                              value={mergeTarget}
-                              onChange={(e) => setMergeTarget(e.target.value)}
-                              className="flex-1 h-8 px-2 rounded border text-xs bg-white dark:bg-gray-800"
-                            >
-                              <option value="">Into this location...</option>
-                              {locations.map((loc) => (
-                                <option key={loc.id} value={loc.id}>{loc.name}</option>
-                              ))}
-                            </select>
-                          </div>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={mergeLocations}
-                              disabled={!mergeSource || !mergeTarget || mergeSource === mergeTarget || isMerging}
-                              className="h-7 px-3 bg-amber-600 hover:bg-amber-700 text-white rounded text-xs font-medium disabled:opacity-50 transition-colors"
-                            >
-                              {isMerging ? "Merging..." : "Merge"}
-                            </button>
-                            <button
-                              onClick={() => { setShowMerge(false); setMergeSource(""); setMergeTarget(""); }}
-                              className="h-7 px-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded text-xs"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="space-y-px">
-                        {locations
-                          .filter((loc) =>
-                            !locationFilter || loc.name.toLowerCase().includes(locationFilter.toLowerCase())
-                          )
-                          .map((location) => (
-                          <div
-                            key={location.id}
-                            className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg transition-colors ${
-                              locationForm.id === location.id
-                                ? "bg-[#4285F4]/5"
-                                : "hover:bg-gray-50 dark:hover:bg-gray-800/30"
-                            }`}
-                          >
-                            <div className="min-w-0 flex-1">
-                              <p className="text-xs font-medium truncate flex items-center gap-1.5">
-                                {location.name}
-                                {!!location.item_count && (
-                                  <span className={`inline-flex items-center justify-center h-4 min-w-[16px] px-1 rounded-full text-[9px] font-medium ${
-                                    location.item_count >= 10
-                                      ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300"
-                                      : location.item_count >= 5
-                                      ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
-                                      : location.item_count >= 2
-                                      ? "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
-                                      : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"
-                                  }`}>
-                                    {location.item_count}
-                                  </span>
-                                )}
-                              </p>
-                              <p className="text-[10px] text-gray-500 truncate leading-tight">
-                                {location.latitude.toFixed(4)}, {location.longitude.toFixed(4)}
-                                {location.address ? ` · ${location.address}` : ""}
-                              </p>
-                            </div>
-                            <div className="flex gap-0.5 flex-shrink-0">
-                              <button
-                                onClick={() => {
-                                  setLocationForm({
-                                    id: location.id, name: location.name,
-                                    address: location.address || "",
-                                    latitude: location.latitude, longitude: location.longitude,
-                                  });
-                                  setFlyToKey((k) => k + 1);
-                                }}
-                                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700"
-                                aria-label="Edit"
-                              >
-                                <Pencil className="w-3 h-3" />
-                              </button>
-                              <button
-                                onClick={() => deleteLocation(location.id)}
-                                className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500"
-                                aria-label="Delete"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                        {locations.length === 0 && (
-                          <p className="py-6 text-xs text-gray-400 text-center">No saved locations yet.</p>
-                        )}
+                {/* Location Cards */}
+                <div className="flex-1 min-h-0">
+                  {locations.length === 0 ? (
+                    <div className="flex items-center justify-center py-20">
+                      <div className="text-center">
+                        <MapPin className="w-10 h-10 mx-auto mb-3 text-gray-300" />
+                        <p className="text-sm font-medium" style={{ color: "var(--color-text)" }}>No locations yet</p>
+                        <p className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>Click the map or "Add Location" to create one</p>
                       </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="space-y-1">
+                      {locations.filter((loc) => !locationFilter || loc.name.toLowerCase().includes(locationFilter.toLowerCase())).map((loc) => (
+                        <div
+                          key={loc.id}
+                          onClick={() => { setEditingLocation(loc); setFlyToKey((k) => k + 1); }}
+                          className={`flex items-center gap-4 px-4 py-3 rounded-xl cursor-pointer transition-all border ${
+                            editingLocation?.id === loc.id ? "bg-[#4285F4]/5 border-[#4285F4]/30" : "hover:bg-gray-50 dark:hover:bg-gray-800/30 border-transparent"
+                          }`}
+                        >
+                          <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "var(--color-accent-muted)" }}>
+                            <MapPin className="w-5 h-5" style={{ color: "var(--color-accent)" }} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold truncate" style={{ color: "var(--color-text)" }}>{loc.name}</p>
+                            <p className="text-xs truncate" style={{ color: "var(--color-muted)" }}>{loc.address || `${loc.latitude.toFixed(4)}, ${loc.longitude.toFixed(4)}`}</p>
+                          </div>
+                          <div className="flex-shrink-0">
+                            {loc.item_count ? (
+                              <span className={`inline-flex items-center justify-center h-5 min-w-[22px] px-1.5 rounded-full text-[11px] font-semibold ${
+                                loc.item_count >= 10 ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300"
+                                : loc.item_count >= 5 ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
+                                : "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
+                              }`}>{loc.item_count}</span>
+                            ) : <span className="text-xs" style={{ color: "var(--color-muted)" }}>—</span>}
+                          </div>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <button onClick={(e) => { e.stopPropagation(); setEditingLocation(loc); setFlyToKey((k) => k + 1); }} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" aria-label="Edit">
+                              <Pencil className="w-3.5 h-3.5" style={{ color: "var(--color-muted)" }} />
+                            </button>
+                            <button onClick={(e) => { e.stopPropagation(); deleteLocation(loc.id); }} className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500 transition-colors" aria-label="Delete">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
-          </div>
+          </>
         ) : (
           <>
         {/* Header Info Section */}
@@ -1261,6 +1170,7 @@ export default function AdminDashboard() {
                               location_id: it.location_id || "",
                               description: it.description || "",
                               notes: it.notes || "",
+                              google_route_url: it.google_route_url || "",
                               sort_order: it.sort_order,
                             });
                           }}
@@ -1326,7 +1236,7 @@ export default function AdminDashboard() {
                         }
                         className="h-9 px-3 rounded-lg border text-xs"
                       >
-                        <option value="">Select location</option>
+                        <option value="">No location</option>
                         {locations.map((location) => (
                           <option key={location.id} value={location.id}>
                             {location.name}
@@ -1356,6 +1266,19 @@ export default function AdminDashboard() {
                         }
                         placeholder="Notes"
                         className="h-10 sm:h-9 px-3 rounded-lg border text-xs"
+                      />
+                    </div>
+                    <div className="mb-3">
+                      <input
+                        value={editItemForm.google_route_url}
+                        onChange={(e) =>
+                          setEditItemForm({
+                            ...editItemForm,
+                            google_route_url: e.target.value,
+                          })
+                        }
+                        placeholder="Google Route URL (optional)"
+                        className="h-10 sm:h-9 w-full px-3 rounded-lg border text-xs"
                       />
                     </div>
                     <div className="flex gap-2">
@@ -1403,9 +1326,10 @@ export default function AdminDashboard() {
                     start_time: "09:00",
                     end_time: "",
                     activity: "",
-                    location_id: locations[0]?.id || "",
+                    location_id: "",
                     description: "",
                     notes: "",
+                    google_route_url: "",
                     sort_order: newSort,
                   });
                 }}

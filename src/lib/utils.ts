@@ -108,14 +108,19 @@ export function estimateTravelTime(
 
   const current = items[currentIndex];
   const next = items[currentIndex + 1];
+  const curLat = current.latitude;
+  const curLng = current.longitude;
+  const nextLat = next.latitude;
+  const nextLng = next.longitude;
+  if (typeof curLat !== "number" || typeof curLng !== "number" || typeof nextLat !== "number" || typeof nextLng !== "number") return null;
 
   const R = 6371;
-  const dLat = ((next.latitude - current.latitude) * Math.PI) / 180;
-  const dLon = ((next.longitude - current.longitude) * Math.PI) / 180;
+  const dLat = ((nextLat - curLat) * Math.PI) / 180;
+  const dLon = ((nextLng - curLng) * Math.PI) / 180;
   const a =
     Math.sin(dLat / 2) ** 2 +
-    Math.cos((current.latitude * Math.PI) / 180) *
-      Math.cos((next.latitude * Math.PI) / 180) *
+    Math.cos((curLat * Math.PI) / 180) *
+      Math.cos((nextLat * Math.PI) / 180) *
       Math.sin(dLon / 2) ** 2;
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   const distanceKm = R * c;

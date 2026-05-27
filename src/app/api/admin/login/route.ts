@@ -9,7 +9,15 @@ export async function POST(request: Request) {
 
     if (password === ADMIN_PASSWORD) {
       const token = Buffer.from(`admin:${Date.now()}`).toString("base64");
-      return NextResponse.json({ success: true, token });
+      const response = NextResponse.json({ success: true, token });
+      response.cookies.set("admin_token", token, {
+        httpOnly: false,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+        maxAge: 60 * 60 * 24, // 24 hours
+      });
+      return response;
     }
 
     return NextResponse.json(

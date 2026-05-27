@@ -1,0 +1,567 @@
+$ findstr /n ") : (" "src\app\admin\page.tsx"
+[exit 0]
+39:const AdminLocationMap = dynamic(
+40:  () => import("@/components/admin/AdminLocationMap").then((mod) => mod.AdminLocationMap),
+41:  { ssr: false }
+42:);
+45:  name: string;
+46:  address: string;
+47:  latitude: number;
+48:  longitude: number;
+51:function SortableRow({
+57:}: {
+58:  item: ItineraryItem;
+59:  idx: number;
+60:  editingItem: string | null;
+61:  onEdit: (item: ItineraryItem) => void;
+62:  onDelete: (id: string) => void;
+63:}) {
+71:  } = useSortable({ id: item.id });
+73:  return (
+77:        transform: CSS.Transform.toString(transform),
+79:        borderColor: "var(--color-border)",
+81:      className={cn(
+84:        editingItem === item.id && "bg-[var(--color-accent-muted)]"
+85:      )}
+87:      <td className="px-1 sm:px-2 py-2">
+91:          className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 cursor-grab active:cursor-grabbing touch-none min-w-[32px] min-h-[32px] flex items-center justify-center"
+97:      <td className="px-0.5 sm:px-1 py-2 text-[11px] sm:text-xs text-gray-400 tabular-nums w-5 sm:w-6">
+100:      <td className="px-0.5 sm:px-1 py-2 text-[11px] sm:text-xs tabular-nums whitespace-nowrap">
+104:      <td className="px-0.5 sm:px-1 py-2 text-[11px] sm:text-xs font-medium truncate max-w-[100px] sm:max-w-none">
+107:      <td className="px-0.5 sm:px-1 py-2 text-[11px] sm:text-xs hidden sm:table-cell">
+113:      <td className="px-0.5 sm:px-1 py-2 text-[11px] sm:text-xs text-gray-400 hidden sm:table-cell max-w-[180px] truncate">
+116:      <td className="px-1 sm:px-2 py-2 text-right">
+119:            onClick={() => onEdit(item)}
+120:            className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 min-w-[32px] min-h-[32px] flex items-center justify-center"
+125:            onClick={() => onDelete(item.id)}
+126:            className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500 min-w-[32px] min-h-[32px] flex items-center justify-center"
+133:  );
+137:  attributes: DraggableAttributes;
+138:  listeners: DraggableSyntheticListeners;
+139:  isDragging: boolean;
+142:const DaySortableContext = createContext<DaySortableContextType | null>(null);
+144:function SortableDayCard({ day, children }: { day: DayWithItems; children: React.ReactNode }) {
+145:  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: day.id });
+146:  const style = { transform: CSS.Transform.toString(transform), transition };
+147:  return (
+152:        className={cn(
+153:          "rounded-2xl border border-[var(--color-border)] overflow-hidden",
+155:        )}
+160:  );
+163:function DayDragHandle() {
+164:  const ctx = useContext(DaySortableContext);
+165:  if (!ctx) return null;
+166:  return (
+169:      {...(ctx.listeners as React.DOMAttributes<HTMLButtonElement>)}
+170:      className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 cursor-grab active:cursor-grabbing touch-none min-w-[32px] min-h-[32px] flex items-center justify-center flex-shrink-0"
+175:  );
+178:export default function AdminDashboard() {
+179:  const router = useRouter();
+180:  const [days, setDays] = useState<DayWithItems[]>([]);
+181:  const [locations, setLocations] = useState<Location[]>([]);
+182:  const [activeScreen, setActiveScreen] = useState<"itinerary" | "locations">("itinerary");
+183:  const [isLoading, setIsLoading] = useState(true);
+184:  const [editingDay, setEditingDay] = useState<string | null>(null);
+185:  const [editingItem, setEditingItem] = useState<string | null>(null);
+186:  const [newItemDayId, setNewItemDayId] = useState<string | null>(null);
+187:  const [editDayForm, setEditDayForm] = useState({ title: "", date: "" });
+188:  const [editItemForm, setEditItemForm] = useState({
+189:    start_time: "",
+190:    end_time: "",
+191:    activity: "",
+192:    location_id: "",
+193:    description: "",
+194:    notes: "",
+195:    google_route_url: "",
+196:    sort_order: 0,
+197:  });
+199:  const [locationFilter, setLocationFilter] = useState("");
+200:  const [flyToKey, setFlyToKey] = useState(0);
+201:  const [theme, setTheme] = useState<"light" | "dark">("light");
+202:  const [showMerge, setShowMerge] = useState(false);
+203:  const [mergeSource, setMergeSource] = useState("");
+204:  const [mergeTarget, setMergeTarget] = useState("");
+205:  const [isMerging, setIsMerging] = useState(false);
+206:  const [drawerOpen, setDrawerOpen] = useState(false);
+207:  const [editingLocation, setEditingLocation] = useState<Location | null>(null);
+209:  const [headerTitle, setHeaderTitle] = useState("");
+210:  const [headerSubtitle, setHeaderSubtitle] = useState("");
+211:  const [isEditingHeader, setIsEditingHeader] = useState(false);
+212:  const [newDayForm, setNewDayForm] = useState({ title: "", date: "" });
+213:  const [showNewDay, setShowNewDay] = useState(false);
+215:  const sensors = useSensors(
+216:    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+217:  );
+219:  const [token, setToken] = useState<string | null>(null);
+221:  useEffect(() => {
+222:    const stored = localStorage.getItem("admin_token");
+223:    if (stored) {
+224:      setToken(stored);
+226:  }, []);
+228:  useEffect(() => {
+229:    if (token) {
+230:      fetchData();
+232:  }, [token]);
+235:  useEffect(() => {
+237:    const current = html.getAttribute("data-theme") || "light";
+238:    setTheme(current === "dark" ? "dark" : "light");
+239:    const observer = new MutationObserver(() => {
+240:      const t = html.getAttribute("data-theme") || "light";
+241:      setTheme(t === "dark" ? "dark" : "light");
+242:    });
+243:    observer.observe(html, { attributes: true, attributeFilter: ["data-theme"] });
+244:    return () => observer.disconnect();
+245:  }, []);
+247:  async function fetchData() {
+248:    if (!token) return;
+249:    const headers = { Authorization: `Bearer ${token}` };
+252:      const [daysRes, itemsRes, locationsRes, settingsRes] = await Promise.all([
+253:        fetch("/api/admin/days", { headers }),
+254:        fetch("/api/admin/items", { headers }),
+255:        fetch("/api/admin/locations", { headers }),
+256:        fetch("/api/settings"),
+257:      ]);
+259:      if (daysRes.status === 401 || itemsRes.status === 401 || locationsRes.status === 401) {
+260:        localStorage.removeItem("admin_token");
+262:        setToken(null);
+266:      const [daysData, itemsData, locationsData, settingsData] = await Promise.all([
+267:        daysRes.ok ? daysRes.json() : { days: [] },
+268:        itemsRes.ok ? itemsRes.json() : { items: [] },
+269:        locationsRes.ok ? locationsRes.json() : { locations: [] },
+270:        settingsRes.ok ? settingsRes.json() : {} as Record<string, string>,
+271:      ]);
+273:      const daysWithItems = (daysData.days || []).map((day: ItineraryDay) => ({
+275:        items: ((itemsData.items || []) as ItineraryItem[])
+276:          .filter((item: ItineraryItem) => item.day_id === day.id)
+277:          .sort((a, b) => a.sort_order - b.sort_order),
+278:      }));
+279:      setDays(daysWithItems);
+280:      setLocations(locationsData.locations || []);
+282:      if (settingsData.trip_title) setHeaderTitle(settingsData.trip_title);
+283:      if (settingsData.trip_subtitle) setHeaderSubtitle(settingsData.trip_subtitle);
+284:    } catch (e) {
+285:      console.error("Failed to load admin data:", e);
+287:      setIsLoading(false);
+291:  const saveHeader = useCallback(async () => {
+293:      Authorization: `Bearer ${token}`,
+294:      "Content-Type": "application/json",
+296:    const res = await fetch("/api/admin/settings", {
+297:      method: "PUT",
+299:      body: JSON.stringify({
+300:        trip_title: headerTitle,
+301:        trip_subtitle: headerSubtitle,
+302:      }),
+303:    });
+304:    if (res.ok) {
+305:      toast.success("Header updated");
+306:      setIsEditingHeader(false);
+308:      toast.error("Failed to update header");
+310:  }, [token, headerTitle, headerSubtitle]);
+312:  const addDay = useCallback(async () => {
+314:      Authorization: `Bearer ${token}`,
+315:      "Content-Type": "application/json",
+317:    const maxOrder = Math.max(0, ...days.map((d) => d.sort_order));
+318:    const res = await fetch("/api/admin/days", {
+319:      method: "POST",
+321:      body: JSON.stringify({
+322:        title: newDayForm.title,
+323:        date: newDayForm.date,
+324:        sort_order: maxOrder + 1,
+325:      }),
+326:    });
+327:    if (res.ok) {
+328:      toast.success("Day added");
+329:      setNewDayForm({ title: "", date: "" });
+330:      setShowNewDay(false);
+331:      fetchData();
+333:      toast.error("Failed to add day");
+335:  }, [token, newDayForm, days]);
+337:  const saveDay = useCallback(
+338:    async (day: ItineraryDay) => {
+340:        Authorization: `Bearer ${token}`,
+341:        "Content-Type": "application/json",
+343:      const res = await fetch("/api/admin/days", {
+344:        method: "PUT",
+346:        body: JSON.stringify(day),
+347:      });
+348:      if (res.ok) {
+349:        toast.success("Day updated");
+350:        fetchData();
+352:        toast.error("Failed to update day");
+356:  );
+358:  const deleteDay = useCallback(
+359:    async (id: string) => {
+360:      if (!confirm("Delete this day and all its items?")) return;
+361:      const headers = { Authorization: `Bearer ${token}` };
+362:      const res = await fetch(`/api/admin/days?id=${id}`, {
+363:        method: "DELETE",
+365:      });
+366:      if (res.ok) {
+367:        toast.success("Day deleted");
+368:        fetchData();
+370:        toast.error("Failed to delete day");
+374:  );
+376:  const saveItem = useCallback(
+377:    async (item: Partial<ItineraryItem> & { id?: string }) => {
+379:        Authorization: `Bearer ${token}`,
+380:        "Content-Type": "application/json",
+382:      const method = item.id ? "PUT" : "POST";
+383:      const res = await fetch("/api/admin/items", {
+386:        body: JSON.stringify(item),
+387:      });
+388:      if (res.ok) {
+389:        toast.success(item.id ? "Item updated" : "Item created");
+390:        setEditingItem(null);
+391:        setNewItemDayId(null);
+392:        fetchData();
+394:        toast.error("Failed to save item");
+398:  );
+400:  const deleteLocation = useCallback(
+401:    async (id: string) => {
+402:      if (!confirm("Delete this location?")) return;
+403:      const headers = { Authorization: `Bearer ${token}` };
+404:      let res: Response;
+406:        res = await fetch(`/api/admin/locations?id=${id}`, {
+407:          method: "DELETE",
+409:        });
+411:        toast.error("Network error — could not delete location");
+414:      let data: { error?: string };
+416:        data = await res.json();
+418:        toast.error("Server returned an invalid response");
+421:      if (res.ok) {
+422:        toast.success("Location deleted");
+423:        fetchData();
+425:        toast.error(data.error || "Failed to delete location");
+429:  );
+431:  const mergeLocations = useCallback(async () => {
+432:    if (!mergeSource || !mergeTarget) return;
+433:    if (mergeSource === mergeTarget) {
+434:      toast.error("Cannot merge a location into itself");
+437:    setIsMerging(true);
+439:      const res = await fetch("/api/admin/locations/merge", {
+440:        method: "POST",
+441:        headers: {
+442:          Authorization: `Bearer ${token}`,
+443:          "Content-Type": "application/json",
+445:        body: JSON.stringify({ sourceId: mergeSource, targetId: mergeTarget }),
+446:      });
+447:      const data = await res.json();
+448:      if (res.ok) {
+449:        toast.success(`Merged "${data.sourceName}" → "${data.targetName}" (${data.affectedItems} items updated)`);
+450:        setShowMerge(false);
+451:        setMergeSource("");
+452:        setMergeTarget("");
+453:        fetchData();
+455:        toast.error(data.error || "Failed to merge locations");
+458:      toast.error("Network error during merge");
+460:      setIsMerging(false);
+462:  }, [mergeSource, mergeTarget, token]);
+464:  const deleteItem = useCallback(
+465:    async (id: string) => {
+466:      if (!confirm("Delete this item?")) return;
+467:      const headers = { Authorization: `Bearer ${token}` };
+468:      let res: Response;
+470:        res = await fetch(`/api/admin/items?id=${id}`, {
+471:          method: "DELETE",
+473:        });
+475:        toast.error("Network error — could not delete item");
+478:      let data: { error?: string } = {};
+480:        data = await res.json();
+484:      if (res.ok) {
+485:        toast.success("Item deleted");
+486:        fetchData();
+488:        toast.error(data.error || "Failed to delete item");
+492:  );
+494:  const handleDragEnd = useCallback(
+495:    async (dayId: string, event: DragEndEvent) => {
+497:      if (!over || active.id === over.id) return;
+499:      setDays((prev) =>
+500:        prev.map((day) => {
+501:          if (day.id !== dayId) return day;
+503:          const oldIndex = items.findIndex((i) => i.id === active.id);
+504:          const newIndex = items.findIndex((i) => i.id === over.id);
+505:          if (oldIndex === -1 || newIndex === -1) return day;
+506:          const [moved] = items.splice(oldIndex, 1);
+507:          items.splice(newIndex, 0, moved);
+508:          const reordered = items.map((item, i) => ({
+510:            sort_order: i + 1,
+511:          }));
+512:          return { ...day, items: reordered };
+513:        })
+514:      );
+517:      const day = days.find((d) => d.id === dayId);
+518:      if (!day) return;
+520:      const oldIndex = items.findIndex((i) => i.id === active.id);
+521:      const newIndex = items.findIndex((i) => i.id === over.id);
+522:      if (oldIndex === -1 || newIndex === -1) return;
+523:      const [moved] = items.splice(oldIndex, 1);
+524:      items.splice(newIndex, 0, moved);
+527:        Authorization: `Bearer ${token}`,
+528:        "Content-Type": "application/json",
+530:      await fetch("/api/admin/items/reorder", {
+531:        method: "PUT",
+533:        body: JSON.stringify({
+534:          items: items.map((item, i) => ({ id: item.id, sort_order: i + 1 })),
+535:        }),
+536:      });
+539:  );
+541:  const handleDayDragEnd = useCallback(
+542:    async (event: DragEndEvent) => {
+544:      if (!over || active.id === over.id) return;
+546:      setDays((prev) => {
+547:        const oldIndex = prev.findIndex((d) => d.id === active.id);
+548:        const newIndex = prev.findIndex((d) => d.id === over.id);
+549:        if (oldIndex === -1 || newIndex === -1) return prev;
+551:        const [moved] = reordered.splice(oldIndex, 1);
+552:        reordered.splice(newIndex, 0, moved);
+553:        return reordered.map((day, i) => ({ ...day, sort_order: i + 1 }));
+554:      });
+557:        .map((day) => ({ ...day }))
+558:        .sort((a, b) => a.sort_order - b.sort_order);
+559:      const oldIndex = reorderedDays.findIndex((d) => d.id === active.id);
+560:      const newIndex = reorderedDays.findIndex((d) => d.id === over.id);
+561:      if (oldIndex === -1 || newIndex === -1) return;
+562:      const [moved] = reorderedDays.splice(oldIndex, 1);
+563:      reorderedDays.splice(newIndex, 0, moved);
+566:        Authorization: `Bearer ${token}`,
+567:        "Content-Type": "application/json",
+569:      await fetch("/api/admin/days/reorder", {
+570:        method: "PUT",
+572:        body: JSON.stringify({
+573:          days: reorderedDays.map((day, i) => ({ id: day.id, sort_order: i + 1 })),
+574:        }),
+575:      });
+578:  );
+580:  function logout() {
+581:    localStorage.removeItem("admin_token");
+583:    setToken(null);
+584:    router.replace("/admin/login");
+587:  if (isLoading || !token) {
+588:    return (
+592:    );
+595:  return (
+596:    <div className="h-screen flex flex-col" style={{ background: "var(--color-bg)" }}>
+597:      <header className="flex-shrink-0 z-30" style={{ background: "var(--color-panel)", backdropFilter: "blur(12px)", borderBottom: "1px solid var(--color-border)" }}>
+598:        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-2">
+599:          <h1 className="text-base sm:text-lg font-semibold tracking-tight" style={{ color: "var(--color-text)" }}>Admin Dashboard</h1>
+600:          <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+602:              onClick={() => {
+605:                html.setAttribute("data-theme", isDark ? "light" : "dark");
+606:                try { localStorage.setItem("theme", isDark ? "light" : "dark"); } catch {}
+607:                setTheme(isDark ? "light" : "dark");
+609:              className="text-sm transition-opacity hover:opacity-70"
+610:              style={{ color: "var(--color-muted)" }}
+613:              {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+618:              className="text-sm font-medium transition-opacity hover:opacity-70"
+619:              style={{ color: "var(--color-accent)" }}
+625:              className="flex items-center gap-1.5 text-sm transition-opacity hover:opacity-70"
+626:              style={{ color: "var(--color-muted)" }}
+628:              <LogOut className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Logout</span>
+632:        <div className="max-w-6xl mx-auto px-4 sm:px-6 pb-3 flex gap-2">
+634:            onClick={() => setActiveScreen("itinerary")}
+635:            className={cn(
+639:                : "hover:opacity-70"
+640:            )}
+642:              background: activeScreen === "itinerary" ? "var(--color-accent)" : "var(--color-card)",
+643:              color: activeScreen === "itinerary" ? "white" : "var(--color-text)",
+644:              border: activeScreen === "itinerary" ? "none" : "1px solid var(--color-border)",
+650:            onClick={() => setActiveScreen("locations")}
+651:            className={cn(
+655:                : "hover:opacity-70"
+656:            )}
+658:              background: activeScreen === "locations" ? "var(--color-accent)" : "var(--color-card)",
+659:              color: activeScreen === "locations" ? "white" : "var(--color-text)",
+660:              border: activeScreen === "locations" ? "none" : "1px solid var(--color-border)",
+668:      <div className={`flex-1 w-full min-h-0 ${activeScreen !== "locations" ? "overflow-y-auto px-4 sm:px-6 py-6 max-w-6xl mx-auto space-y-5" : "overflow-hidden"}`}>
+669:        {activeScreen === "locations" ? (
+672:            <div className="bg-white dark:bg-gray-900 rounded-2xl border border-[var(--color-border)] overflow-hidden flex flex-col min-h-0">
+673:              <div className="px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 flex-shrink-0">
+681:                  onPick={(latitude, longitude) =>
+682:                    setLocationForm((current) => ({
+686:                    }))
+688:                  onSelectLocation={(location) => {
+689:                    setLocationForm({
+690:                      id: location.id,
+691:                      name: location.name,
+692:                      address: location.address || "",
+693:                      latitude: location.latitude,
+694:                      longitude: location.longitude,
+695:                    });
+696:                    setFlyToKey((k) => k + 1);
+707:              {/* Card 1: Add / Edit Location */}
+708:              <div className="flex-shrink-0 bg-white dark:bg-gray-900 rounded-2xl border border-[var(--color-border)] overflow-hidden">
+709:                <div className="px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 border-b border-[var(--color-border)] flex items-center justify-between">
+711:                    {locationForm.id ? (
+716:                    ) : "Add Location"}
+718:                  {locationForm.id && (
+720:                      onClick={() =>
+721:                        setLocationForm({
+722:                          id: "", name: "", address: "",
+723:                          latitude: 43.0621, longitude: 141.3544,
+724:                        })
+726:                      className="text-[11px] text-gray-500 hover:text-gray-700"
+730:                  )}
+739:                        onChange={(e) => setLocationForm({ ...locationForm, name: e.target.value })}
+748:                        onChange={(e) => setLocationForm({ ...locationForm, address: e.target.value })}
+761:                        onChange={(e) => setLocationForm({ ...locationForm, latitude: Number(e.target.value) })}
+771:                        onChange={(e) => setLocationForm({ ...locationForm, longitude: Number(e.target.value) })}
+780:                      onClick={() => setShowSearch(!showSearch)}
+781:                      className="text-xs text-[#4285F4] hover:underline flex items-center gap-1"
+783:                      {showSearch ? "▾" : "▸"} Search Google Maps
+785:                    {showSearch && (
+791:                              onChange={(e) => setLocationSearch(e.target.value)}
+792:                              onKeyDown={(e) => { if (e.key === "Enter") searchLocations(); }}
+796:                            {isSearchingLocations && (
+798:                            )}
+802:                            onChange={(e) => setLocationSearchRegion(e.target.value)}
+803:                            onKeyDown={(e) => { if (e.key === "Enter") searchLocations(); }}
+810:                            className="h-8 w-8 rounded-lg bg-[#4285F4] text-white flex items-center justify-center disabled:opacity-50 flex-shrink-0"
+816:                        {locationResults.length > 0 && (
+818:                            {locationResults.map((result, i) => (
+821:                                onClick={() =>
+822:                                  setLocationForm((current) => ({
+824:                                    name: result.name,
+825:                                    address: result.address,
+826:                                    latitude: result.latitude,
+827:                                    longitude: result.longitude,
+828:                                  }))
+830:                                className="w-full px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+835:                            ))}
+837:                        )}
+839:                    )}
+844:                    disabled={!locationForm.name.trim()}
+845:                    className={`w-full h-10 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${
+847:                        ? "bg-[#4285F4] text-white hover:bg-[#3367d6]"
+848:                        : "bg-[#1a1a1a] text-white hover:bg-[#333]"
+851:                    {locationForm.id ? "Update Location" : "Save Location"}
+856:              {/* Card 2: Locations Table */}
+857:              <div className="flex-1 min-h-0 bg-white dark:bg-gray-900 rounded-2xl border border-[var(--color-border)] overflow-hidden flex flex-col">
+858:                <div className="px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 border-b border-[var(--color-border)] flex items-center justify-between gap-2">
+859:                  <h2 className="text-xs font-medium flex-shrink-0">Locations ({locations.length})</h2>
+864:                        onChange={(e) => setLocationFilter(e.target.value)}
+870:                    {locations.length >= 2 && (
+872:                        onClick={() => { setShowMerge(!showMerge); setMergeSource(""); setMergeTarget(""); }}
+873:                        className={`text-[11px] underline flex-shrink-0 ${showMerge ? "text-amber-700" : "text-amber-600 hover:text-amber-700"}`}
+877:                    )}
+882:                {showMerge && (
+883:                  <div className="px-4 py-3 bg-amber-50 dark:bg-amber-900/10 border-b border-amber-200 dark:border-amber-800/30 space-y-2">
+884:                    <p className="text-xs font-medium text-amber-800 dark:text-amber-300">Merge locations</p>
+888:                        onChange={(e) => setMergeSource(e.target.value)}
+889:                        className="flex-1 h-8 px-2 rounded border text-xs bg-white dark:bg-gray-800"
+892:                        {locations.map((loc) => (
+894:                        ))}
+899:                        onChange={(e) => setMergeTarget(e.target.value)}
+900:                        className="flex-1 h-8 px-2 rounded border text-xs bg-white dark:bg-gray-800"
+903:                        {locations.map((loc) => (
+905:                        ))}
+912:                        className="h-7 px-3 bg-amber-600 hover:bg-amber-700 text-white rounded text-xs font-medium disabled:opacity-50 transition-colors"
+914:                        {isMerging ? "Merging..." : "Merge"}
+917:                        onClick={() => { setShowMerge(false); setMergeSource(""); setMergeTarget(""); }}
+918:                        className="h-7 px-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded text-xs"
+924:                )}
+928:                  {locations.length === 0 ? (
+930:                  ) : (
+932:                      <thead className="sticky top-0 bg-gray-50 dark:bg-gray-800/50 text-gray-500">
+936:                          <th className="text-left px-2 py-2 font-medium hidden sm:table-cell">Coordinates</th>
+941:                      <tbody className="divide-y divide-[var(--color-border)]">
+943:                          .filter((loc) =>
+944:                            !locationFilter || loc.name.toLowerCase().includes(locationFilter.toLowerCase())
+945:                          )
+946:                          .map((loc, i) => (
+949:                            className={`transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/30 cursor-pointer ${
+950:                              locationForm.id === loc.id ? "bg-[#4285F4]/5" : ""
+952:                            onClick={() => {
+953:                              setLocationForm({
+954:                                id: loc.id, name: loc.name,
+955:                                address: loc.address || "",
+956:                                latitude: loc.latitude, longitude: loc.longitude,
+957:                              });
+958:                              setFlyToKey((k) => k + 1);
+964:                              {loc.address && (
+966:                              )}
+968:                            <td className="px-2 py-2 text-gray-500 font-mono hidden sm:table-cell">
+969:                              {loc.latitude.toFixed(4)}, {loc.longitude.toFixed(4)}
+972:                              {loc.item_count ? (
+975:                                    ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300"
+976:                                    : loc.item_count >= 5
+977:                                    ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
+978:                                    : "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
+982:                              ) : (
+984:                              )}
+989:                                  onClick={(e) => {
+990:                                    e.stopPropagation();
+991:                                    setLocationForm({
+992:                                      id: loc.id, name: loc.name,
+993:                                      address: loc.address || "",
+994:                                      latitude: loc.latitude, longitude: loc.longitude,
+995:                                    });
+996:                                    setFlyToKey((k) => k + 1);
+998:                                  className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 min-w-[32px] min-h-[32px] flex items-center justify-center"
+1004:                                  onClick={(e) => {
+1005:                                    e.stopPropagation();
+1006:                                    deleteLocation(loc.id);
+1008:                                  className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500 min-w-[32px] min-h-[32px] flex items-center justify-center"
+1016:                        ))}
+1019:                  )}
+1025:        ) : (
+1028:        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-[var(--color-border)] overflow-hidden">
+1029:          <div className="px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between bg-gray-50 dark:bg-gray-800/50 border-b border-[var(--color-border)]">
+1030:            <h2 className="font-medium text-xs sm:text-sm">Page Header</h2>
+1032:              onClick={() => setIsEditingHeader(!isEditingHeader)}
+1033:              className="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 min-w-[36px] min-h-[36px] flex items-center justify-center"
+1038:          <div className="px-4 sm:px-6 py-3 sm:py-4 space-y-2">
+1041:              {isEditingHeader ? (
+1044:                  onChange={(e) => setHeaderTitle(e.target.value)}
+1047:              ) : (
+1049:              )}
+1053:              {isEditingHeader ? (
+1056:                  onChange={(e) => setHeaderSubtitle(e.target.value)}
+1059:              ) : (
+1060:                <p className="text-xs text-[var(--color-muted)]">{headerSubtitle}</p>
+1061:              )}
+1063:            {isEditingHeader && (
+1072:                  onClick={() => setIsEditingHeader(false)}
+1073:                  className="h-8 px-4 bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-100 rounded-lg text-xs"
+1078:            )}
+1088:          items={days.map((d) => d.id)}
+1091:        {days.map((day) => (
+1094:            <div className="px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between bg-gray-50 dark:bg-gray-800/50 border-b border-[var(--color-border)] gap-2">
+1098:                  <h2 className="font-medium text-xs sm:text-sm truncate">{day.title}</h2>
+1099:                  <p className="text-[11px] sm:text-xs text-[var(--color-muted)]">
+1104:              <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
+1106:                  onClick={() => {
+1107:                    setEditingDay(day.id);
+1108:                    setEditDayForm({ title: day.title, date: day.date });
+1110:                  className="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 min-w-[36px] min-h-[36px] flex items-center justify-center"
+1115:                  onClick={() => deleteDay(day.id)}
+1116:                  className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500 min-w-[36px] min-h-[36px] flex items-center justify-center"
+1124:            {editingDay === day.id && (
+1125:              <div className="px-4 sm:px-6 py-3 sm:py-4 bg-blue-50/30 dark:bg-blue-900/10 border-b border-[var(--color-border)] space-y-3">
+1128:                  onChange={(e) =>
+1129:                    setEditDayForm({ ...editDayForm, title: e.target.value })
+1137:                  onChange={(e) =>
+1138:                    setEditDayForm({ ...editDayForm, date: e.target.value })
+1144:                    onClick={() => {
+1145:                      saveDay({ ...day, ...editDayForm });
+1146:                      setEditingDay(null);
+1153:                    onClick={() => setEditingDay(null)}
+1154:                    className="h-8 px-4 bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-100 rounded-lg text-xs"
+1160:            )}
+1167:                onDragEnd={(event) => handleDragEnd(day.id, event)}
+1171:                    <tr className="border-b border-[var(--color-border)] text-xs text-[var(--color-muted)]">
+1178:                      <th className="text-left px-1 py-2 font-medium hidden sm:table-cell">
+1181:                      <th className="text-left px-1 py-2 font-medium hidden sm:table-cell">
+1190:                    items={day.items.map((i) => i.id)}
+1194:                      {day.items.map((item, idx) => (
+1200:                          onEdit={(it) => {
+1201:                            setEditingItem(it.id);
+1202:                            setEditItemForm({
+1203:                              start_time: it.start_time,
+1204:                              end_time: it.end_time || "",
+1205:                              activity: it.activity,
+1206:                              location_id: it.location_id || "",
+1207:                              description: it.description || "",
+1208:                              notes: it.notes || "",
+
+
+[… truncated 5449 chars …]

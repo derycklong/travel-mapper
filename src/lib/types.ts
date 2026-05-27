@@ -14,10 +14,11 @@ export interface ItineraryItem {
   end_time: string | null;
   activity: string;
   description: string | null;
-  latitude: number;
-  longitude: number;
+  latitude: number | null;
+  longitude: number | null;
   location_name: string;
   notes: string | null;
+  google_route_url: string | null;
   sort_order: number;
   created_at?: string;
 }

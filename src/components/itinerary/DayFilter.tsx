@@ -33,6 +33,17 @@ export function DayFilter({ days: daysProp }: DayFilterProps = {}) {
     return () => el.removeEventListener("scroll", checkScroll);
   }, [days]);
 
+  // Scroll active pill into view when activeDayFilter changes (e.g. via swipe)
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const childIndex = activeDayFilter === null ? 0 : activeDayFilter + 1;
+    const child = el.children[childIndex] as HTMLElement | undefined;
+    if (child) {
+      child.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+    }
+  }, [activeDayFilter]);
+
   function handleWheel(e: WheelEvent<HTMLDivElement>) {
     if (!scrollRef.current) return;
     scrollRef.current.scrollLeft += e.deltaY;

@@ -51,8 +51,8 @@ export async function POST(request: Request) {
 
   db.prepare(
     `INSERT INTO itinerary_items
-     (id, day_id, location_id, start_time, end_time, activity, description, latitude, longitude, location_name, notes, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     (id, day_id, location_id, start_time, end_time, activity, description, latitude, longitude, location_name, notes, google_route_url, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     body.day_id,
@@ -61,10 +61,11 @@ export async function POST(request: Request) {
     body.end_time || null,
     body.activity,
     body.description || null,
-    location?.latitude ?? body.latitude ?? 43.0621,
-    location?.longitude ?? body.longitude ?? 141.3544,
+    location?.latitude ?? null,
+    location?.longitude ?? null,
     location?.name ?? body.location_name ?? "",
     body.notes || null,
+    body.google_route_url || null,
     body.sort_order ?? 0
   );
 
@@ -82,8 +83,8 @@ export async function PUT(request: Request) {
   const location = getLocation(updates.location_id);
   if (updates.location_id !== undefined) {
     updates.location_name = location?.name || "";
-    updates.latitude = location?.latitude ?? 43.0621;
-    updates.longitude = location?.longitude ?? 141.3544;
+    updates.latitude = location?.latitude ?? null;
+    updates.longitude = location?.longitude ?? null;
   }
 
   const fieldMap: Record<string, string> = {
@@ -96,6 +97,7 @@ export async function PUT(request: Request) {
     longitude: "longitude",
     location_name: "location_name",
     notes: "notes",
+    google_route_url: "google_route_url",
     sort_order: "sort_order",
     day_id: "day_id",
   };
