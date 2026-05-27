@@ -25,6 +25,7 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
+  useDraggable,
   type DragEndEvent,
   type DraggableAttributes,
 } from "@dnd-kit/core";
@@ -175,6 +176,85 @@ function DayDragHandle() {
     >
       <GripVertical className="w-3.5 h-3.5 text-gray-400" />
     </button>
+  );
+}
+
+function DraggableLocationCard({
+  location,
+  isEditing,
+  onClick,
+  onEdit,
+  onDelete,
+}: {
+  location: Location;
+  isEditing: boolean;
+  onClick: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: location.id,
+  });
+
+  const style = transform ? {
+    transform: CSS.Translate.toString(transform),
+  } : undefined;
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      onClick={onClick}
+      className={`flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all border ${
+        isDragging ? "opacity-50" : ""
+      } ${
+        isEditing
+          ? "bg-[#4285F4]/5 border-[#4285F4]/30"
+          : "hover:bg-gray-50 dark:hover:bg-gray-800/30 border-transparent"
+      }`}
+    >
+      <div
+        {...attributes}
+        {...(listeners as React.DOMAttributes<HTMLDivElement>)}
+        onClick={(e) => e.stopPropagation()}
+        className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 cursor-grab active:cursor-grabbing touch-none flex-shrink-0"
+        aria-label="Drag to merge"
+      >
+        <GripVertical className="w-4 h-4 text-gray-400" />
+      </div>
+      <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "var(--color-accent-muted)" }}>
+        <MapPin className="w-4 h-4" style={{ color: "var(--color-accent)" }} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold truncate" style={{ color: "var(--color-text)" }}>{location.name}</p>
+        <p className="text-xs truncate" style={{ color: "var(--color-muted)" }}>{location.address || `${location.latitude.toFixed(4)}, ${location.longitude.toFixed(4)}`}</p>
+      </div>
+      <div className="flex-shrink-0">
+        {location.item_count ? (
+          <span className={`inline-flex items-center justify-center h-5 min-w-[22px] px-1.5 rounded-full text-[11px] font-semibold ${
+            location.item_count >= 10 ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300"
+            : location.item_count >= 5 ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
+            : "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
+          }`}>{location.item_count}</span>
+        ) : <span className="text-xs" style={{ color: "var(--color-muted)" }}>—</span>}
+      </div>
+      <div className="flex items-center gap-1 flex-shrink-0">
+        <button
+          onClick={(e) => { e.stopPropagation(); onEdit(); }}
+          className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          aria-label="Edit"
+        >
+          <Pencil className="w-3.5 h-3.5" style={{ color: "var(--color-muted)" }} />
+        </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500 transition-colors"
+          aria-label="Delete"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -760,55 +840,14 @@ export default function AdminDashboard() {
                     >
                       <div className="space-y-1">
                         {locations.filter((loc) => !locationFilter || loc.name.toLowerCase().includes(locationFilter.toLowerCase())).map((loc) => (
-                          <div
+                          <DraggableLocationCard
                             key={loc.id}
+                            location={loc}
+                            isEditing={editingLocation?.id === loc.id}
                             onClick={() => { setEditingLocation(loc); setFlyToKey((k) => k + 1); }}
-                            className={`flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all border ${
-                              editingLocation?.id === loc.id
-                                ? "bg-[#4285F4]/5 border-[#4285F4]/30"
-                                : "hover:bg-gray-50 dark:hover:bg-gray-800/30 border-transparent"
-                            }`}
-                          >
-                            <div
-                              onClick={(e) => e.stopPropagation()}
-                              className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 cursor-grab active:cursor-grabbing touch-none flex-shrink-0"
-                              aria-label="Drag to merge"
-                            >
-                              <GripVertical className="w-4 h-4 text-gray-400" />
-                            </div>
-                            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "var(--color-accent-muted)" }}>
-                              <MapPin className="w-4 h-4" style={{ color: "var(--color-accent)" }} />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-semibold truncate" style={{ color: "var(--color-text)" }}>{loc.name}</p>
-                              <p className="text-xs truncate" style={{ color: "var(--color-muted)" }}>{loc.address || `${loc.latitude.toFixed(4)}, ${loc.longitude.toFixed(4)}`}</p>
-                            </div>
-                            <div className="flex-shrink-0">
-                              {loc.item_count ? (
-                                <span className={`inline-flex items-center justify-center h-5 min-w-[22px] px-1.5 rounded-full text-[11px] font-semibold ${
-                                  loc.item_count >= 10 ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300"
-                                  : loc.item_count >= 5 ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
-                                  : "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
-                                }`}>{loc.item_count}</span>
-                              ) : <span className="text-xs" style={{ color: "var(--color-muted)" }}>—</span>}
-                            </div>
-                            <div className="flex items-center gap-1 flex-shrink-0">
-                              <button
-                                onClick={(e) => { e.stopPropagation(); setEditingLocation(loc); setFlyToKey((k) => k + 1); }}
-                                className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                                aria-label="Edit"
-                              >
-                                <Pencil className="w-3.5 h-3.5" style={{ color: "var(--color-muted)" }} />
-                              </button>
-                              <button
-                                onClick={(e) => { e.stopPropagation(); deleteLocation(loc.id); }}
-                                className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500 transition-colors"
-                                aria-label="Delete"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
+                            onEdit={() => { setEditingLocation(loc); setFlyToKey((k) => k + 1); }}
+                            onDelete={() => deleteLocation(loc.id)}
+                          />
                         ))}
                       </div>
                     </DndContext>
