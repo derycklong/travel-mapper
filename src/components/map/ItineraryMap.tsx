@@ -716,7 +716,7 @@ export function ItineraryMap() {
         zoomControl={false}
         attributionControl={false}
       >
-        <TileLayer key={tileLayer.key} attribution={tileLayer.attribution} url={tileLayer.url} tileSize={256} />
+        <TileLayer key={tileLayer.key} attribution={tileLayer.attribution} url={tileLayer.url} tileSize={256} keepBuffer={6} />
 
         <MapController
           selectedItemId={selectedItemId}
