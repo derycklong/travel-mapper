@@ -620,6 +620,11 @@ export function ItineraryMap() {
 
   const allItems = useMemo(() => filteredDays.flatMap((d) => d.items), [filteredDays]);
 
+  // Re-center map when day filter changes
+  useEffect(() => {
+    setFitBoundsFlag((f) => f + 1);
+  }, [activeDayFilter]);
+
   const closePopups = useCallback(() => { setPoppedKey(null); selectItem(null); }, [selectItem]);
 
   const handleMarkerTap = useCallback((item: ItineraryItem) => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, createContext, useContext } from "react";
+import React, { useEffect, useState, useCallback, useRef, createContext, useContext } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { toast } from "sonner";
@@ -17,7 +17,6 @@ import {
   Moon,
   Sun,
 } from "lucide-react";
-import * as Dialog from "@radix-ui/react-dialog";
 import { cn } from "@/lib/utils";
 import {
   DndContext,
@@ -25,7 +24,6 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
-  useDraggable,
   type DragEndEvent,
   type DraggableAttributes,
 } from "@dnd-kit/core";
@@ -42,15 +40,12 @@ const AdminLocationMap = dynamic(
   { ssr: false }
 );
 
-const EditLocationDialog = dynamic(
-  () => import("@/components/admin/EditLocationDialog").then((mod) => mod.EditLocationDialog),
-  { ssr: false }
-);
-
-const GoogleLocationSearch = dynamic(
-  () => import("@/components/admin/GoogleLocationSearch"),
-  { ssr: false }
-);
+interface LocationSearchResult {
+  name: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+}
 
 function SortableRow({
   item,
@@ -179,85 +174,6 @@ function DayDragHandle() {
   );
 }
 
-function DraggableLocationCard({
-  location,
-  isEditing,
-  onClick,
-  onEdit,
-  onDelete,
-}: {
-  location: Location;
-  isEditing: boolean;
-  onClick: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-}) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: location.id,
-  });
-
-  const style = transform ? {
-    transform: CSS.Translate.toString(transform),
-  } : undefined;
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      onClick={onClick}
-      className={`flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all border ${
-        isDragging ? "opacity-50" : ""
-      } ${
-        isEditing
-          ? "bg-[#4285F4]/5 border-[#4285F4]/30"
-          : "hover:bg-gray-50 dark:hover:bg-gray-800/30 border-transparent"
-      }`}
-    >
-      <div
-        {...attributes}
-        {...(listeners as React.DOMAttributes<HTMLDivElement>)}
-        onClick={(e) => e.stopPropagation()}
-        className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 cursor-grab active:cursor-grabbing touch-none flex-shrink-0"
-        aria-label="Drag to merge"
-      >
-        <GripVertical className="w-4 h-4 text-gray-400" />
-      </div>
-      <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "var(--color-accent-muted)" }}>
-        <MapPin className="w-4 h-4" style={{ color: "var(--color-accent)" }} />
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold truncate" style={{ color: "var(--color-text)" }}>{location.name}</p>
-        <p className="text-xs truncate" style={{ color: "var(--color-muted)" }}>{location.address || `${location.latitude.toFixed(4)}, ${location.longitude.toFixed(4)}`}</p>
-      </div>
-      <div className="flex-shrink-0">
-        {location.item_count ? (
-          <span className={`inline-flex items-center justify-center h-5 min-w-[22px] px-1.5 rounded-full text-[11px] font-semibold ${
-            location.item_count >= 10 ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300"
-            : location.item_count >= 5 ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
-            : "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
-          }`}>{location.item_count}</span>
-        ) : <span className="text-xs" style={{ color: "var(--color-muted)" }}>—</span>}
-      </div>
-      <div className="flex items-center gap-1 flex-shrink-0">
-        <button
-          onClick={(e) => { e.stopPropagation(); onEdit(); }}
-          className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-          aria-label="Edit"
-        >
-          <Pencil className="w-3.5 h-3.5" style={{ color: "var(--color-muted)" }} />
-        </button>
-        <button
-          onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500 transition-colors"
-          aria-label="Delete"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export default function AdminDashboard() {
   const router = useRouter();
   const [days, setDays] = useState<DayWithItems[]>([]);
@@ -273,19 +189,30 @@ export default function AdminDashboard() {
     end_time: "",
     activity: "",
     location_id: "",
-    description: "",
     notes: "",
     google_route_url: "",
     sort_order: 0,
   });
 
+  const [locationForm, setLocationForm] = useState({
+    id: "",
+    name: "",
+    address: "",
+    latitude: 43.0621,
+    longitude: 141.3544,
+  });
+  const [locationSearch, setLocationSearch] = useState("");
+  const [locationSearchRegion, setLocationSearchRegion] = useState("");
+  const [locationResults, setLocationResults] = useState<LocationSearchResult[]>([]);
+  const [isSearchingLocations, setIsSearchingLocations] = useState(false);
+  const lastSearchRef = useRef(0);
   const [locationFilter, setLocationFilter] = useState("");
   const [flyToKey, setFlyToKey] = useState(0);
   const [theme, setTheme] = useState<"light" | "dark">("light");
-  const [editingLocation, setEditingLocation] = useState<Location | null>(null);
-  const [mergeSourceId, setMergeSourceId] = useState("");
-  const [mergeTargetId, setMergeTargetId] = useState("");
-  const [showMergeConfirm, setShowMergeConfirm] = useState(false);
+  const [showMerge, setShowMerge] = useState(false);
+  const [mergeSource, setMergeSource] = useState("");
+  const [mergeTarget, setMergeTarget] = useState("");
+  const [isMerging, setIsMerging] = useState(false);
 
   const [headerTitle, setHeaderTitle] = useState("");
   const [headerSubtitle, setHeaderSubtitle] = useState("");
@@ -297,23 +224,15 @@ export default function AdminDashboard() {
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
 
-  const locationSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
-  );
-
-  const [token, setToken] = useState<string | null>(null);
+  const token =
+    typeof window !== "undefined" ? localStorage.getItem("admin_token") : null;
 
   useEffect(() => {
-    const stored = localStorage.getItem("admin_token");
-    if (stored) {
-      setToken(stored);
+    if (!token) {
+      router.push("/admin/login");
+      return;
     }
-  }, []);
-
-  useEffect(() => {
-    if (token) {
-      fetchData();
-    }
+    fetchData();
   }, [token]);
 
   // Sync theme state with document
@@ -330,7 +249,6 @@ export default function AdminDashboard() {
   }, []);
 
   async function fetchData() {
-    if (!token) return;
     const headers = { Authorization: `Bearer ${token}` };
 
     try {
@@ -343,8 +261,7 @@ export default function AdminDashboard() {
 
       if (daysRes.status === 401 || itemsRes.status === 401 || locationsRes.status === 401) {
         localStorage.removeItem("admin_token");
-        document.cookie = "admin_token=; path=/; max-age=0";
-        setToken(null);
+        router.push("/admin/login");
         return;
       }
 
@@ -482,6 +399,100 @@ export default function AdminDashboard() {
     [token]
   );
 
+  const searchLocations = useCallback(async () => {
+    if (!locationSearch.trim()) return;
+    const now = Date.now();
+    if (now - lastSearchRef.current < 500) return;
+    lastSearchRef.current = now;
+    setIsSearchingLocations(true);
+    try {
+      const headers = { Authorization: `Bearer ${token}` };
+      const params = new URLSearchParams({ q: locationSearch });
+      if (locationSearchRegion.trim()) params.set("region", locationSearchRegion.trim());
+      const res = await fetch(
+        `/api/admin/location-search?${params}`,
+        { headers }
+      );
+      const data = await res.json();
+      if (res.ok) {
+        setLocationResults(data.results || []);
+      } else {
+        toast.error(data.error || "Location search failed");
+      }
+    } finally {
+      setIsSearchingLocations(false);
+    }
+  }, [locationSearch, locationSearchRegion, token]);
+
+  const saveLocation = useCallback(async () => {
+    if (!locationForm.name.trim()) {
+      toast.error("Location name is required");
+      return;
+    }
+
+    const lat = Number(locationForm.latitude);
+    const lng = Number(locationForm.longitude);
+    if (isNaN(lat) || isNaN(lng)) {
+      toast.error("Invalid latitude or longitude");
+      return;
+    }
+
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    };
+    const method = locationForm.id ? "PUT" : "POST";
+    let res: Response;
+    try {
+      res = await fetch("/api/admin/locations", {
+        method,
+        headers,
+        body: JSON.stringify({
+          id: locationForm.id || undefined,
+          name: locationForm.name,
+          address: locationForm.address,
+          latitude: lat,
+          longitude: lng,
+        }),
+      });
+    } catch {
+      toast.error("Network error — could not reach the server");
+      return;
+    }
+
+    let data: { error?: string };
+    try {
+      data = await res.json();
+    } catch {
+      toast.error("Server returned an invalid response");
+      return;
+    }
+
+    if (res.ok) {
+      toast.success(locationForm.id ? "Location updated" : "Location saved");
+      if (locationForm.id) {
+        setLocations((prev) =>
+          prev.map((loc) =>
+            loc.id === locationForm.id
+              ? { ...loc, latitude: lat, longitude: lng, name: locationForm.name.trim(), address: locationForm.address }
+              : loc
+          )
+        );
+      }
+      setLocationForm({
+        id: "",
+        name: "",
+        address: "",
+        latitude: 43.0621,
+        longitude: 141.3544,
+      });
+      setLocationResults([]);
+      fetchData();
+    } else {
+      toast.error(data.error || "Failed to save location");
+    }
+  }, [locationForm, token]);
+
   const deleteLocation = useCallback(
     async (id: string) => {
       if (!confirm("Delete this location?")) return;
@@ -513,8 +524,13 @@ export default function AdminDashboard() {
     [token]
   );
 
-  const confirmMerge = useCallback(async () => {
-    if (!mergeSourceId || !mergeTargetId) return;
+  const mergeLocations = useCallback(async () => {
+    if (!mergeSource || !mergeTarget) return;
+    if (mergeSource === mergeTarget) {
+      toast.error("Cannot merge a location into itself");
+      return;
+    }
+    setIsMerging(true);
     try {
       const res = await fetch("/api/admin/locations/merge", {
         method: "POST",
@@ -522,33 +538,24 @@ export default function AdminDashboard() {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ sourceId: mergeSourceId, targetId: mergeTargetId }),
+        body: JSON.stringify({ sourceId: mergeSource, targetId: mergeTarget }),
       });
       const data = await res.json();
       if (res.ok) {
         toast.success(`Merged "${data.sourceName}" → "${data.targetName}" (${data.affectedItems} items updated)`);
-        setMergeSourceId("");
-        setMergeTargetId("");
-        setShowMergeConfirm(false);
+        setShowMerge(false);
+        setMergeSource("");
+        setMergeTarget("");
         fetchData();
       } else {
         toast.error(data.error || "Failed to merge locations");
       }
     } catch {
       toast.error("Network error during merge");
+    } finally {
+      setIsMerging(false);
     }
-  }, [mergeSourceId, mergeTargetId, token]);
-
-  const handleLocationDragEnd = useCallback(
-    (event: DragEndEvent) => {
-      const { active, over } = event;
-      if (!over || active.id === over.id) return;
-      setMergeSourceId(String(active.id));
-      setMergeTargetId(String(over.id));
-      setShowMergeConfirm(true);
-    },
-    []
-  );
+  }, [mergeSource, mergeTarget, token]);
 
   const deleteItem = useCallback(
     async (id: string) => {
@@ -668,12 +675,10 @@ export default function AdminDashboard() {
 
   function logout() {
     localStorage.removeItem("admin_token");
-    document.cookie = "admin_token=; path=/; max-age=0";
-    setToken(null);
-    router.replace("/admin/login");
+    router.push("/admin/login");
   }
 
-  if (isLoading || !token) {
+  if (isLoading) {
     return (
       <div className="h-screen flex items-center justify-center">
         <p className="text-sm text-gray-400">Loading admin...</p>
@@ -756,178 +761,343 @@ export default function AdminDashboard() {
 
       <div className={`flex-1 w-full min-h-0 ${activeScreen !== "locations" ? "overflow-y-auto px-4 sm:px-6 py-6 max-w-6xl mx-auto space-y-5" : "overflow-hidden"}`}>
         {activeScreen === "locations" ? (
-          <>
-            <div className="grid grid-cols-2 h-full">
-              {/* Left: Map */}
-              <div className="p-6 pr-3 min-h-0">
-                <div className="h-full bg-white dark:bg-gray-900 rounded-2xl border border-[var(--color-border)] overflow-hidden flex flex-col">
-                  <div className="px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 flex-shrink-0">
-                    <h2 className="font-medium text-xs">Map  <span className="text-gray-400 font-normal">· Click to set coordinates</span></h2>
-                  </div>
-                  <div className="relative flex-1 min-h-0">
-                    <AdminLocationMap
-                      latitude={editingLocation?.latitude ?? 43.0621}
-                      locations={locations}
-                      longitude={editingLocation?.longitude ?? 141.3544}
-                      onPick={(latitude, longitude) => {
-                        setEditingLocation((prev) => {
-                          if (prev) {
-                            toast.success("Coordinates updated — click Update Location to save");
-                            return { ...prev, latitude, longitude };
-                          }
-                          return { id: "", name: "", address: null, latitude, longitude };
-                        });
-                        setFlyToKey((k) => k + 1);
-                      }}
-                      onSelectLocation={(location) => {
-                        setEditingLocation(location);
-                        setFlyToKey((k) => k + 1);
-                      }}
-                      selectedLocationId={editingLocation?.id || ""}
-                      flyToKey={flyToKey}
-                    />
-                  </div>
-                </div>
+          <div className="grid h-full grid-cols-[minmax(0,1fr)_minmax(360px,520px)] gap-6 p-6">
+            {/* Map */}
+            <div className="bg-white dark:bg-gray-900 rounded-2xl border border-[var(--color-border)] overflow-hidden flex-1 min-w-0 flex flex-col min-h-0">
+              <div className="px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 flex-shrink-0">
+                <h2 className="font-medium text-xs">Map  <span className="text-gray-400 font-normal">· Click to set coordinates</span></h2>
               </div>
-
-              {/* Right: Main Content */}
-              <div className="p-6 pl-3 min-h-0 flex flex-col gap-4">
-                {/* Toolbar */}
-                <div className="flex-shrink-0 flex items-center gap-3">
-                  <button
-                    onClick={() => setEditingLocation({ id: "", name: "", address: null, latitude: 43.0621, longitude: 141.3544 })}
-                    className="h-10 px-4 rounded-xl text-sm font-semibold text-white flex items-center gap-2 transition-colors hover:opacity-90"
-                    style={{ background: "var(--color-accent)" }}
-                  >
-                    <Plus className="w-4 h-4" />
-                    Add Location
-                  </button>
-                  <div className="relative flex-1 max-w-xs">
-                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input
-                      value={locationFilter}
-                      onChange={(e) => setLocationFilter(e.target.value)}
-                      placeholder="Filter locations..."
-                      className="h-10 w-full pl-9 pr-4 rounded-xl border text-sm"
-                      style={{ borderColor: "var(--color-border)", background: "var(--color-card)", color: "var(--color-text)" }}
-                    />
-                  </div>
-                </div>
-
-                {/* Google Maps Search */}
-                <GoogleLocationSearch
-                  token={token}
-                  onSelectResult={(result) => {
-                    setEditingLocation({ id: "", name: result.name, address: result.address, latitude: result.latitude, longitude: result.longitude });
+              <div className="relative flex-1 min-h-0">
+                <AdminLocationMap
+                  latitude={locationForm.latitude}
+                  locations={locations}
+                  longitude={locationForm.longitude}
+                  onPick={(latitude, longitude) =>
+                    setLocationForm((current) => ({
+                      ...current,
+                      latitude,
+                      longitude,
+                    }))
+                  }
+                  onSelectLocation={(location) => {
+                    setLocationForm({
+                      id: location.id,
+                      name: location.name,
+                      address: location.address || "",
+                      latitude: location.latitude,
+                      longitude: location.longitude,
+                    });
+                    setFlyToKey((k) => k + 1);
                   }}
+                  selectedLocationId={locationForm.id}
+                  flyToKey={flyToKey}
                 />
+              </div>
+            </div>
 
-                {/* Location Cards with Drag-and-Drop */}
-                <div className="flex-1 min-h-0">
-                  {locations.length === 0 ? (
-                    <div className="flex items-center justify-center py-20">
-                      <div className="text-center">
-                        <MapPin className="w-10 h-10 mx-auto mb-3 text-gray-300" />
-                        <p className="text-sm font-medium" style={{ color: "var(--color-text)" }}>No locations yet</p>
-                        <p className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>Click the map or &quot;Add Location&quot; to create one</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <DndContext
-                      sensors={locationSensors}
-                      collisionDetection={closestCenter}
-                      onDragEnd={handleLocationDragEnd}
+            {/* Right panel: single scrollable column */}
+            <div className="flex flex-col min-w-0 min-h-0">
+              <div className={`bg-white dark:bg-gray-900 rounded-2xl border overflow-hidden flex flex-col flex-1 min-h-0 ${
+                locationForm.id
+                  ? "border-[#4285F4]/40 ring-1 ring-[#4285F4]/20"
+                  : "border-[var(--color-border)]"
+              }`}>
+                {/* Header */}
+                <div className={`px-4 py-2.5 border-b flex items-center justify-between ${
+                  locationForm.id
+                    ? "bg-[#4285F4]/5 border-[#4285F4]/20"
+                    : "bg-gray-50 dark:bg-gray-800/50 border-[var(--color-border)]"
+                }`}>
+                  <h2 className="text-xs font-medium">
+                    {locationForm.id ? (
+                      <span className="flex items-center gap-1.5">
+                        <Pencil className="w-3 h-3 text-[#4285F4]" />
+                        Edit Location
+                      </span>
+                    ) : "New Location"}
+                  </h2>
+                  {locationForm.id && (
+                    <button
+                      onClick={() =>
+                        setLocationForm({
+                          id: "", name: "", address: "",
+                          latitude: 43.0621, longitude: 141.3544,
+                        })
+                      }
+                      className="text-[11px] text-gray-500 hover:text-gray-700 underline"
                     >
-                      <div className="space-y-1">
-                        {locations.filter((loc) => !locationFilter || loc.name.toLowerCase().includes(locationFilter.toLowerCase())).map((loc) => (
-                          <DraggableLocationCard
-                            key={loc.id}
-                            location={loc}
-                            isEditing={editingLocation?.id === loc.id}
-                            onClick={() => { setEditingLocation(loc); setFlyToKey((k) => k + 1); }}
-                            onEdit={() => { setEditingLocation(loc); setFlyToKey((k) => k + 1); }}
-                            onDelete={() => deleteLocation(loc.id)}
-                          />
-                        ))}
-                      </div>
-                    </DndContext>
+                      Cancel
+                    </button>
                   )}
                 </div>
 
-                {/* Edit Location Dialog */}
-                <EditLocationDialog
-                  open={editingLocation !== null}
-                  onOpenChange={(open) => { if (!open) setEditingLocation(null); }}
-                  location={editingLocation}
-                  onSave={(data) => {
-                    if (!editingLocation) return;
-                    const lat = Number(data.latitude);
-                    const lng = Number(data.longitude);
-                    if (!data.name.trim() || isNaN(lat) || isNaN(lng)) {
-                      toast.error("Location name is required and coordinates must be valid");
-                      return;
-                    }
-                    const headers = {
-                      Authorization: `Bearer ${token}`,
-                      "Content-Type": "application/json",
-                    };
-                    const method = editingLocation.id ? "PUT" : "POST";
-                    fetch("/api/admin/locations", {
-                      method,
-                      headers,
-                      body: JSON.stringify({
-                        id: editingLocation.id || undefined,
-                        name: data.name,
-                        address: data.address || "",
-                        latitude: lat,
-                        longitude: lng,
-                      }),
-                    }).then(async (res) => {
-                      const json = await res.json();
-                      if (res.ok) {
-                        toast.success(editingLocation.id ? "Location updated" : "Location saved");
-                        setEditingLocation(null);
-                        fetchData();
-                      } else {
-                        toast.error(json.error || "Failed to save location");
-                      }
-                    }).catch(() => {
-                      toast.error("Network error — could not reach the server");
-                    });
-                  }}
-                />
-
-                {/* Merge Confirmation Dialog */}
-                <Dialog.Root open={showMergeConfirm} onOpenChange={(open) => { if (!open) { setShowMergeConfirm(false); setMergeSourceId(""); setMergeTargetId(""); } }}>
-                  <Dialog.Portal>
-                    <Dialog.Overlay className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40" />
-                    <Dialog.Content className="fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-amber-300 dark:border-amber-700">
-                      <div className="p-5 space-y-4">
+                <div className="flex flex-col flex-1 min-h-0">
+                  <div className="flex-shrink-0 p-3 space-y-3">
+                    {/* Google Maps Search */}
+                    <div className="bg-white dark:bg-gray-900 rounded-xl border border-[var(--color-border)] p-3">
+                      <h3 className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Google Maps Search</h3>
+                      <div className="grid grid-cols-[1fr_auto] gap-2 mb-2">
                         <div>
-                          <Dialog.Title className="text-sm font-semibold text-amber-800 dark:text-amber-300">Merge Locations</Dialog.Title>
-                          <Dialog.Description className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>
-                            {(() => {
-                              const source = locations.find((l) => l.id === mergeSourceId);
-                              const target = locations.find((l) => l.id === mergeTargetId);
-                              return source && target ? `Merge "${source.name}" into "${target.name}"? All items will be moved. This cannot be undone.` : "Confirm merge?";
-                            })()}
-                          </Dialog.Description>
+                          <label className="text-[10px] uppercase tracking-wider text-gray-400 mb-1 block">Search</label>
+                          <div className="relative">
+                            <input
+                              value={locationSearch}
+                              onChange={(e) => setLocationSearch(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === "Enter") searchLocations(); }}
+                              placeholder="Place name..."
+                              className="h-9 w-full pl-2.5 pr-7 rounded-lg border text-xs"
+                            />
+                            {isSearchingLocations && (
+                              <div className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 border-2 border-[#4285F4] border-t-transparent rounded-full animate-spin" />
+                            )}
+                          </div>
                         </div>
-                        <div className="flex gap-2">
-                          <button onClick={confirmMerge} className="flex-1 h-9 rounded-lg text-sm font-medium bg-amber-600 text-white hover:bg-amber-700 transition-colors">
-                            Confirm Merge
-                          </button>
-                          <button onClick={() => { setShowMergeConfirm(false); setMergeSourceId(""); setMergeTargetId(""); }} className="flex-1 h-9 rounded-lg text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors" style={{ color: "var(--color-text)" }}>
-                            Cancel
-                          </button>
+                        <div>
+                          <label className="text-[10px] uppercase tracking-wider text-gray-400 mb-1 block">Region</label>
+                          <div className="flex gap-1.5">
+                            <input
+                              value={locationSearchRegion}
+                              onChange={(e) => setLocationSearchRegion(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === "Enter") searchLocations(); }}
+                              placeholder="e.g. Japan"
+                              className="h-9 w-28 rounded-lg border text-xs px-2.5"
+                            />
+                            <button
+                              onClick={searchLocations}
+                              disabled={isSearchingLocations}
+                              className="h-9 w-9 rounded-lg bg-[#4285F4] text-white flex items-center justify-center disabled:opacity-50 flex-shrink-0"
+                              aria-label="Search"
+                            >
+                              <Search className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
                       </div>
-                    </Dialog.Content>
-                  </Dialog.Portal>
-                </Dialog.Root>
+                      {locationResults.length > 0 && (
+                        <div className="max-h-32 overflow-y-auto rounded-lg border divide-y text-xs">
+                          {locationResults.map((result, i) => (
+                            <button
+                              key={`${result.latitude}-${result.longitude}-${i}`}
+                              onClick={() =>
+                                setLocationForm((current) => ({
+                                  ...current,
+                                  name: result.name,
+                                  address: result.address,
+                                  latitude: result.latitude,
+                                  longitude: result.longitude,
+                                }))
+                              }
+                              className="w-full px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                            >
+                              <p className="font-medium">{result.name}</p>
+                              <p className="text-gray-500 truncate">{result.address}</p>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Form fields */}
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] uppercase tracking-wider text-gray-400 mb-1 block">Name</label>
+                          <input
+                            value={locationForm.name}
+                            onChange={(e) => setLocationForm({ ...locationForm, name: e.target.value })}
+                            placeholder="Location name"
+                            className="h-9 w-full px-3 rounded-lg border text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase tracking-wider text-gray-400 mb-1 block">Address</label>
+                          <input
+                            value={locationForm.address}
+                            onChange={(e) => setLocationForm({ ...locationForm, address: e.target.value })}
+                            placeholder="Address"
+                            className="h-9 w-full px-3 rounded-lg border text-xs"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] uppercase tracking-wider text-gray-400 mb-1 block">Latitude</label>
+                          <input
+                            type="number" step="any"
+                            value={locationForm.latitude}
+                            onChange={(e) => setLocationForm({ ...locationForm, latitude: Number(e.target.value) })}
+                            placeholder="Latitude"
+                            className="h-9 w-full px-3 rounded-lg border text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase tracking-wider text-gray-400 mb-1 block">Longitude</label>
+                          <input
+                            type="number" step="any"
+                            value={locationForm.longitude}
+                            onChange={(e) => setLocationForm({ ...locationForm, longitude: Number(e.target.value) })}
+                            placeholder="Longitude"
+                            className="h-9 w-full px-3 rounded-lg border text-xs"
+                          />
+                        </div>
+                      </div>
+                      <button
+                        onClick={saveLocation}
+                        disabled={!locationForm.name.trim()}
+                        className={`w-full h-8 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 ${
+                          locationForm.id
+                            ? "bg-[#4285F4] text-white hover:bg-[#3367d6]"
+                            : "bg-[#1a1a1a] text-white hover:bg-[#333]"
+                        }`}
+                      >
+                        {locationForm.id ? "Update Location" : "Save Location"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="h-px bg-[var(--color-border)] mx-3" />
+
+                  {/* Scrollable: saved locations list */}
+                  <div className="flex-1 overflow-y-auto px-3 pb-3">
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-xs font-medium text-gray-500">Saved ({locations.length})</h3>
+                          {locations.length >= 2 && (
+                            <button
+                              onClick={() => { setShowMerge(!showMerge); setMergeSource(""); setMergeTarget(""); }}
+                              className={`text-[11px] underline ${showMerge ? "text-amber-700" : "text-amber-600 hover:text-amber-700"}`}
+                            >
+                              Merge
+                            </button>
+                          )}
+                        </div>
+                        <div className="relative w-36">
+                          <input
+                            value={locationFilter}
+                            onChange={(e) => setLocationFilter(e.target.value)}
+                            placeholder="Filter..."
+                            className="h-6 w-full pl-5 pr-2 rounded border text-[10px]"
+                          />
+                          <Search className="w-2.5 h-2.5 absolute left-1.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                        </div>
+                      </div>
+
+                      {showMerge && (
+                        <div className="mb-3 p-2.5 rounded-lg bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/30 space-y-2">
+                          <p className="text-xs font-medium text-amber-800 dark:text-amber-300">Merge locations</p>
+                          <div className="flex items-center gap-1.5">
+                            <select
+                              value={mergeSource}
+                              onChange={(e) => setMergeSource(e.target.value)}
+                              className="flex-1 h-8 px-2 rounded border text-xs bg-white dark:bg-gray-800"
+                            >
+                              <option value="">Merge this location...</option>
+                              {locations.map((loc) => (
+                                <option key={loc.id} value={loc.id}>{loc.name}</option>
+                              ))}
+                            </select>
+                            <span className="text-xs text-amber-600 font-medium">→</span>
+                            <select
+                              value={mergeTarget}
+                              onChange={(e) => setMergeTarget(e.target.value)}
+                              className="flex-1 h-8 px-2 rounded border text-xs bg-white dark:bg-gray-800"
+                            >
+                              <option value="">Into this location...</option>
+                              {locations.map((loc) => (
+                                <option key={loc.id} value={loc.id}>{loc.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={mergeLocations}
+                              disabled={!mergeSource || !mergeTarget || mergeSource === mergeTarget || isMerging}
+                              className="h-7 px-3 bg-amber-600 hover:bg-amber-700 text-white rounded text-xs font-medium disabled:opacity-50 transition-colors"
+                            >
+                              {isMerging ? "Merging..." : "Merge"}
+                            </button>
+                            <button
+                              onClick={() => { setShowMerge(false); setMergeSource(""); setMergeTarget(""); }}
+                              className="h-7 px-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded text-xs"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="space-y-px">
+                        {locations
+                          .filter((loc) =>
+                            !locationFilter || loc.name.toLowerCase().includes(locationFilter.toLowerCase())
+                          )
+                          .map((location) => (
+                          <div
+                            key={location.id}
+                            className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg transition-colors ${
+                              locationForm.id === location.id
+                                ? "bg-[#4285F4]/5"
+                                : "hover:bg-gray-50 dark:hover:bg-gray-800/30"
+                            }`}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-medium truncate flex items-center gap-1.5">
+                                {location.name}
+                                {!!location.item_count && (
+                                  <span className={`inline-flex items-center justify-center h-4 min-w-[16px] px-1 rounded-full text-[9px] font-medium ${
+                                    location.item_count >= 10
+                                      ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300"
+                                      : location.item_count >= 5
+                                      ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
+                                      : location.item_count >= 2
+                                      ? "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
+                                      : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"
+                                  }`}>
+                                    {location.item_count}
+                                  </span>
+                                )}
+                              </p>
+                              <p className="text-[10px] text-gray-500 truncate leading-tight">
+                                {location.latitude.toFixed(4)}, {location.longitude.toFixed(4)}
+                                {location.address ? ` · ${location.address}` : ""}
+                              </p>
+                            </div>
+                            <div className="flex gap-0.5 flex-shrink-0">
+                              <button
+                                onClick={() => {
+                                  setLocationForm({
+                                    id: location.id, name: location.name,
+                                    address: location.address || "",
+                                    latitude: location.latitude, longitude: location.longitude,
+                                  });
+                                  setFlyToKey((k) => k + 1);
+                                }}
+                                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+                                aria-label="Edit"
+                              >
+                                <Pencil className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={() => deleteLocation(location.id)}
+                                className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500"
+                                aria-label="Delete"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                        {locations.length === 0 && (
+                          <p className="py-6 text-xs text-gray-400 text-center">No saved locations yet.</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
-          </>
+          </div>
         ) : (
           <>
         {/* Header Info Section */}
@@ -1097,165 +1267,131 @@ export default function AdminDashboard() {
                     strategy={verticalListSortingStrategy}
                   >
                     <tbody>
-                      {day.items.map((item, idx) => (
-                        <SortableRow
-                          key={item.id}
-                          item={item}
-                          idx={idx}
-                          editingItem={editingItem}
-                          onEdit={(it) => {
-                            setEditingItem(it.id);
-                            setEditItemForm({
-                              start_time: it.start_time,
-                              end_time: it.end_time || "",
-                              activity: it.activity,
-                              location_id: it.location_id || "",
-                              description: it.description || "",
-                              notes: it.notes || "",
-                              google_route_url: it.google_route_url || "",
-                              sort_order: it.sort_order,
-                            });
-                          }}
-                          onDelete={deleteItem}
-                        />
-                      ))}
+                      {day.items.map((item, idx) => {
+                        const isEditingThis = editingItem === item.id;
+                        const isAddingHere = newItemDayId === day.id && idx === day.items.length - 1;
+                        const showForm = isEditingThis || isAddingHere;
+                        const formItem = isEditingThis ? item : null;
+                        return (
+                          <React.Fragment key={item.id}>
+                            <SortableRow
+                              item={item}
+                              idx={idx}
+                              editingItem={editingItem}
+                              onEdit={(it) => {
+                                setEditingItem(it.id);
+                                setEditItemForm({
+                                  start_time: it.start_time,
+                                  end_time: it.end_time || "",
+                                  activity: it.activity,
+                                  location_id: it.location_id || "",
+                                  notes: it.notes || "",
+                                  google_route_url: it.google_route_url || "",
+                                  sort_order: it.sort_order,
+                                });
+                              }}
+                              onDelete={deleteItem}
+                            />
+                            {showForm && (
+                              <tr className="bg-blue-50/30 dark:bg-blue-900/10">
+                                <td colSpan={7} className="p-0">
+                                  <div className="px-4 sm:px-6 py-3 sm:py-4 border-t border-[var(--color-border)]">
+                                    <div className="grid grid-cols-2 gap-3 mb-3">
+                                      <div>
+                                        <label className="text-[10px] uppercase tracking-wider text-gray-400 mb-1 block">Start</label>
+                                        <input
+                                          value={editItemForm.start_time}
+                                          onChange={(e) => setEditItemForm({ ...editItemForm, start_time: e.target.value })}
+                                          placeholder="HH:MM"
+                                          className="h-9 w-full px-3 rounded-lg border text-xs"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="text-[10px] uppercase tracking-wider text-gray-400 mb-1 block">End</label>
+                                        <input
+                                          value={editItemForm.end_time}
+                                          onChange={(e) => setEditItemForm({ ...editItemForm, end_time: e.target.value })}
+                                          placeholder="HH:MM"
+                                          className="h-9 w-full px-3 rounded-lg border text-xs"
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3 mb-3">
+                                      <div>
+                                        <label className="text-[10px] uppercase tracking-wider text-gray-400 mb-1 block">Activity</label>
+                                        <input
+                                          value={editItemForm.activity}
+                                          onChange={(e) => setEditItemForm({ ...editItemForm, activity: e.target.value })}
+                                          placeholder="Activity"
+                                          className="h-9 w-full px-3 rounded-lg border text-xs"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="text-[10px] uppercase tracking-wider text-gray-400 mb-1 block">Location</label>
+                                        <select
+                                          value={editItemForm.location_id}
+                                          onChange={(e) => setEditItemForm({ ...editItemForm, location_id: e.target.value })}
+                                          className="h-9 w-full px-3 rounded-lg border text-xs"
+                                        >
+                                          <option value="">No location</option>
+                                          {locations.map((location) => (
+                                            <option key={location.id} value={location.id}>{location.name}</option>
+                                          ))}
+                                        </select>
+                                      </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3 mb-3">
+                                      <div>
+                                        <label className="text-[10px] uppercase tracking-wider text-gray-400 mb-1 block">Notes</label>
+                                        <input
+                                          value={editItemForm.notes}
+                                          onChange={(e) => setEditItemForm({ ...editItemForm, notes: e.target.value })}
+                                          placeholder="Notes"
+                                          className="h-9 w-full px-3 rounded-lg border text-xs"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="text-[10px] uppercase tracking-wider text-gray-400 mb-1 block">Route URL</label>
+                                        <input
+                                          value={editItemForm.google_route_url}
+                                          onChange={(e) => setEditItemForm({ ...editItemForm, google_route_url: e.target.value })}
+                                          placeholder="Google route"
+                                          className="h-9 w-full px-3 rounded-lg border text-xs"
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="flex gap-2">
+                                      <button
+                                        onClick={() => {
+                                          if (isAddingHere) {
+                                            saveItem({ ...editItemForm, day_id: day.id });
+                                          } else if (formItem) {
+                                            saveItem({ id: formItem.id, day_id: formItem.day_id, ...editItemForm });
+                                          }
+                                        }}
+                                        className="h-8 px-4 bg-[#4285F4] text-white rounded-lg text-xs font-medium flex items-center gap-1"
+                                      >
+                                        <Save className="w-3 h-3" /> Save Item
+                                      </button>
+                                      <button
+                                        onClick={() => { setEditingItem(null); setNewItemDayId(null); }}
+                                        className="h-8 px-4 bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-100 rounded-lg text-xs"
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
                     </tbody>
                   </SortableContext>
                 </table>
               </DndContext>
             </div>
-
-            {/* Edit item form */}
-            {(editingItem || newItemDayId === day.id) &&
-              (() => {
-                const item = editingItem
-                  ? day.items.find((i) => i.id === editingItem)
-                  : null;
-                if (!item && newItemDayId !== day.id) return null;
-                return (
-                  <div className="px-4 sm:px-6 py-3 sm:py-4 bg-blue-50/30 dark:bg-blue-900/10 border-t border-[var(--color-border)]">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 mb-3">
-                      <input
-                        value={editItemForm.start_time}
-                        onChange={(e) =>
-                          setEditItemForm({
-                            ...editItemForm,
-                            start_time: e.target.value,
-                          })
-                        }
-                        placeholder="Start (HH:MM)"
-                        className="h-9 px-3 rounded-lg border text-xs"
-                      />
-                      <input
-                        value={editItemForm.end_time}
-                        onChange={(e) =>
-                          setEditItemForm({
-                            ...editItemForm,
-                            end_time: e.target.value,
-                          })
-                        }
-                        placeholder="End (HH:MM)"
-                        className="h-9 px-3 rounded-lg border text-xs"
-                      />
-                      <input
-                        value={editItemForm.activity}
-                        onChange={(e) =>
-                          setEditItemForm({
-                            ...editItemForm,
-                            activity: e.target.value,
-                          })
-                        }
-                        placeholder="Activity"
-                        className="h-9 px-3 rounded-lg border text-xs"
-                      />
-                      <select
-                        value={editItemForm.location_id}
-                        onChange={(e) =>
-                          setEditItemForm({
-                            ...editItemForm,
-                            location_id: e.target.value,
-                          })
-                        }
-                        className="h-9 px-3 rounded-lg border text-xs"
-                      >
-                        <option value="">No location</option>
-                        {locations.map((location) => (
-                          <option key={location.id} value={location.id}>
-                            {location.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 mb-3">
-                      <input
-                        value={editItemForm.description}
-                        onChange={(e) =>
-                          setEditItemForm({
-                            ...editItemForm,
-                            description: e.target.value,
-                          })
-                        }
-                        placeholder="Description"
-                        className="h-10 sm:h-9 px-3 rounded-lg border text-xs"
-                      />
-                      <input
-                        value={editItemForm.notes}
-                        onChange={(e) =>
-                          setEditItemForm({
-                            ...editItemForm,
-                            notes: e.target.value,
-                          })
-                        }
-                        placeholder="Notes"
-                        className="h-10 sm:h-9 px-3 rounded-lg border text-xs"
-                      />
-                    </div>
-                    <div className="mb-3">
-                      <input
-                        value={editItemForm.google_route_url}
-                        onChange={(e) =>
-                          setEditItemForm({
-                            ...editItemForm,
-                            google_route_url: e.target.value,
-                          })
-                        }
-                        placeholder="Google Route URL (optional)"
-                        className="h-10 sm:h-9 w-full px-3 rounded-lg border text-xs"
-                      />
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => {
-                          if (newItemDayId) {
-                            saveItem({
-                              ...editItemForm,
-                              day_id: newItemDayId,
-                            });
-                          } else if (item) {
-                            saveItem({
-                              id: item.id,
-                              day_id: item.day_id,
-                              ...editItemForm,
-                            });
-                          }
-                        }}
-                        className="h-8 px-4 bg-[#4285F4] text-white rounded-lg text-xs font-medium flex items-center gap-1"
-                      >
-                        <Save className="w-3 h-3" /> Save Item
-                      </button>
-                      <button
-                        onClick={() => {
-                          setEditingItem(null);
-                          setNewItemDayId(null);
-                        }}
-                        className="h-8 px-4 bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-100 rounded-lg text-xs"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                );
-              })()}
 
             {/* Add new item */}
             <div className="px-4 sm:px-6 py-2.5 border-t border-[var(--color-border)]">
@@ -1268,8 +1404,7 @@ export default function AdminDashboard() {
                     start_time: "09:00",
                     end_time: "",
                     activity: "",
-                    location_id: "",
-                    description: "",
+                    location_id: locations[0]?.id || "",
                     notes: "",
                     google_route_url: "",
                     sort_order: newSort,
