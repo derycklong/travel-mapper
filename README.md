@@ -6,6 +6,7 @@ Interactive travel itinerary web app with a public timeline + map view, and an a
 
 - **Frontend:** Next.js 16 + TypeScript + Tailwind CSS v4
 - **Map:** React Leaflet (Leaflet) with OpenStreetMap tiles
+- **Routing:** OSRM (Open Source Routing Machine) — road-network route lines between consecutive waypoints
 - **Database:** SQLite via better-sqlite3 (local, zero setup)
 - **State:** Zustand
 - **Icons:** Lucide (core package for raw SVG data)
@@ -124,6 +125,7 @@ src/
 │   │   └── login/page.tsx        # Admin login
 │   └── api/
 │       ├── itinerary/            # Public itinerary API (GET)
+│       ├── routing/              # OSRM road-network routing (in-memory cache, rate-limited)
 │       ├── settings/             # Trip metadata
 │       ├── place-details/        # Google Places details (cached in DB, 30d TTL)
 │       ├── place-photo/[ref]/    # Place photo proxy (cached as BLOB in DB)
@@ -163,6 +165,8 @@ data/
 - **Map popup navigation** — Previous/Next Stop buttons in the popup navigate through items with locations, crossing day boundaries when filtered.
 - **Items without location** — activities without a `location_id` are shown in the timeline but excluded from the map, route, and navigation.
 - **Drawer on mobile** — Vaul-based bottom drawer with scroll position persistence via sessionStorage.
+- **Road-network routing** — route lines between consecutive waypoints use real road data from OSRM instead of straight dashed lines. Routes with overlapping segments are split into visually distinct layers for clarity. Only rendered between items where `google_route_url` is set.
+- **Safari/iOS compat** — overlay pane uses `will-change: transform` to prevent polylines from disappearing during pan/zoom. Map container uses `100dvh` + `translateZ(0)` to work around Vaul's `body.style.height='auto'` collapsing the map on iOS.
 
 ## Customization
 
