@@ -1,6 +1,6 @@
 # travel-mapper
 
-Interactive travel itinerary web app with a public timeline + map view, and an admin dashboard for managing content. Supports any trip — add days, activities, locations with photos and ratings from Google Places.
+Interactive travel itinerary web app with a public timeline + map view and an admin dashboard for managing content. Supports any trip — add days, activities, and locations with photos and ratings from Google Places.
 
 ## Tech Stack
 
@@ -16,6 +16,12 @@ Interactive travel itinerary web app with a public timeline + map view, and an a
 
 ## Getting Started
 
+### Prerequisites
+
+- **Node.js** (v20+ recommended)
+- **npm**
+- **Google Maps API key** (see step 2 below)
+
 ### 1. Install dependencies
 
 ```bash
@@ -24,11 +30,11 @@ npm install
 
 ### 2. Get a Google Maps API key
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/)
 2. Enable the **Places API** (Text Search, Place Details, Place Photos)
 3. Create an API key and restrict it to your app
 
-### 3. Configure environment
+### 3. Configure environment variables
 
 Create `data/.env.local`:
 
@@ -45,7 +51,7 @@ The app auto-creates this file with defaults on first run if it doesn't exist.
 npx tsx scripts/seed.ts
 ```
 
-This populates `data/itinerary.db` with sample data. You can skip this and build your itinerary from scratch in the admin panel.
+This populates `data/itinerary.db` with sample data. Skip this to build your itinerary from scratch in the admin panel.
 
 ### 5. Run locally
 
@@ -61,9 +67,10 @@ npm run dev -- -p 1337
 
 ## Admin Access
 
-Navigate to `/admin` and sign in with the password set in `ADMIN_PASSWORD` (default: `changeme`).
+Navigate to **/admin** and sign in with the password set in `ADMIN_PASSWORD` (default: `changeme`).
 
-From the admin dashboard you can:
+### Admin capabilities
+
 - Add, edit, or delete itinerary days and items
 - Edit coordinates with a live map picker
 - Drag-and-drop reorder days and items
@@ -71,6 +78,21 @@ From the admin dashboard you can:
 - Update trip title and subtitle
 - Search Google Maps with region narrowing to find places
 - All changes save to SQLite in real time
+
+## Key Features
+
+### Map & routing
+
+- **Day filter** — tap a day pill to show only that day's activities on the map and timeline. Each day pill uses its own color.
+- **Sequence badges** — when a day is filtered, markers show continuous sequence numbers (skipping items without location).
+- **Map popup navigation** — Previous/Next Stop buttons in the popup navigate through items with locations, crossing day boundaries when filtered.
+- **Items without location** — activities without a `location_id` are shown in the timeline but excluded from the map, route, and navigation.
+- **Road-network routing** — route lines between consecutive waypoints use real road data from OSRM instead of straight dashed lines. Routes with overlapping segments are split into visually distinct layers for clarity. Only rendered between items where `google_route_url` is set.
+
+### Mobile & cross-browser
+
+- **Drawer on mobile** — Vaul-based bottom drawer with scroll position persistence via sessionStorage.
+- **Safari/iOS compat** — overlay pane uses `will-change: transform` to prevent polylines from disappearing during pan/zoom. Map container uses `100dvh` + `translateZ(0)` to work around Vaul's `body.style.height='auto'` collapsing the map on iOS.
 
 ## Google API Cost Reduction
 
@@ -107,9 +129,16 @@ docker run -d \
   travel-mapper
 ```
 
-The `-v` volume mount provides persistent storage for the SQLite database. On first run with an empty volume, the app creates the database and default env file automatically.
+The `-v` volume mount persists the SQLite database on the host. On first run with an empty volume, the app creates the database and default env file automatically.
 
-**Important:** Pass `GOOGLE_MAPS_API_KEY` as an environment variable (or create `data/.env.local` in the mounted volume). The key is never stored in the database or committed to git.
+> **Important:** Pass `GOOGLE_MAPS_API_KEY` as an environment variable (or create `data/.env.local` in the mounted volume). The key is never stored in the database or committed to git.
+
+## Customization
+
+- **Trip title & subtitle** — edit from the admin settings page, or change defaults in `src/lib/constants.ts`
+- **Map center & zoom** — change `MAP_DEFAULT_CENTER` and `MAP_DEFAULT_ZOOM` in `src/lib/constants.ts`
+- **Sample data** — modify `scripts/seed.ts` to seed your own itinerary
+- **Activity icons** — add or change SVG paths in `src/components/map/ItineraryMap.tsx` (`getActivitySvg` function)
 
 ## Project Structure
 
@@ -157,20 +186,3 @@ data/
 ├── itinerary.db                 # SQLite database (tracked in git)
 └── .env.local                   # Environment config (auto-created, gitignored)
 ```
-
-## Key Features
-
-- **Day filter** — tap a day pill to show only that day's activities on the map and timeline. Each day pill uses its own color.
-- **Sequence badges** — when a day is filtered, markers show continuous sequence numbers (skipping items without location).
-- **Map popup navigation** — Previous/Next Stop buttons in the popup navigate through items with locations, crossing day boundaries when filtered.
-- **Items without location** — activities without a `location_id` are shown in the timeline but excluded from the map, route, and navigation.
-- **Drawer on mobile** — Vaul-based bottom drawer with scroll position persistence via sessionStorage.
-- **Road-network routing** — route lines between consecutive waypoints use real road data from OSRM instead of straight dashed lines. Routes with overlapping segments are split into visually distinct layers for clarity. Only rendered between items where `google_route_url` is set.
-- **Safari/iOS compat** — overlay pane uses `will-change: transform` to prevent polylines from disappearing during pan/zoom. Map container uses `100dvh` + `translateZ(0)` to work around Vaul's `body.style.height='auto'` collapsing the map on iOS.
-
-## Customization
-
-- **Trip title & subtitle** — edit from the admin settings page, or change defaults in `src/lib/constants.ts`
-- **Map center & zoom** — change `MAP_DEFAULT_CENTER` and `MAP_DEFAULT_ZOOM` in `src/lib/constants.ts`
-- **Sample data** — modify `scripts/seed.ts` to seed your own itinerary
-- **Activity icons** — add or change SVG paths in `src/components/map/ItineraryMap.tsx` (`getActivitySvg` function)
