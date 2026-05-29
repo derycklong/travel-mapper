@@ -140,7 +140,11 @@ export function ItineraryApp({ initialDays, tripTitle, tripSubtitle }: Itinerary
   return (
     <div className="h-full relative" style={{ background: "var(--color-bg)" }}>
       {/* Single fullscreen map — shared by both layouts */}
-      <div className="absolute inset-0 isolate">
+      {/* Note: top-0/left-0/right-0 + height:100dvh bypasses Vaul setting
+          body.style.height='auto' on iOS Safari, which collapses height:100% to zero.
+          Using 100dvh instead of inset-0 ensures the map always fills the viewport
+          regardless of body height. */}
+      <div className="absolute isolate" style={{ top: 0, left: 0, right: 0, height: '100dvh', transform: 'translateZ(0)' }}>
         <ItineraryMap />
       </div>
 

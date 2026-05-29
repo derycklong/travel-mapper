@@ -155,6 +155,12 @@ select option {
   animation: tileFadeIn 0.25s ease-out;
 }
 
+/* Force Safari to composite the SVG overlay pane (route lines) in its own layer,
+   preventing the Polylines from disappearing during pan/zoom transforms. */
+.leaflet-overlay-pane svg {
+  will-change: transform;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 4px;

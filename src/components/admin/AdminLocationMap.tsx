@@ -138,7 +138,7 @@ export function AdminLocationMap({
   useEffect(() => {
     const style = document.createElement("style");
     style.id = "admin-leaflet-bg";
-    style.textContent = `#admin-map-container .leaflet-container { background: #F0EFEC !important; }`;
+    style.textContent = `#admin-map-container .leaflet-container { background: #F0EFEC !important; } #admin-map-container .leaflet-tile { filter: saturate(0.5); }`;
     document.head.appendChild(style);
     return () => { const el = document.getElementById("admin-leaflet-bg"); if (el) el.remove(); };
   }, []);
@@ -154,7 +154,7 @@ export function AdminLocationMap({
         zoomControl={false}
         attributionControl={false}
       >
-        <TileLayer url="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png" tileSize={256} keepBuffer={6} />
+        <TileLayer url="https://tile.openstreetmap.org/{z}/{x}/{y}.png" tileSize={256} keepBuffer={6} attribution='&copy; <a href="https://openstreetmap.org/">OpenStreetMap</a>' />
 
         <MapController
           latitude={latitude}

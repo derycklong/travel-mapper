@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -126,6 +126,7 @@ function MapController({
   const map = useMap();
   const prevSelected = useRef<string | null>(null);
   const hasFitInitial = useRef(false);
+  const flyGen = useRef(0);
 
   useEffect(() => {
     const container = map.getContainer();
@@ -232,20 +233,26 @@ function MapController({
 
   useEffect(() => {
     if (fitBoundsFlag === 0 || allItems.length === 0) return;
-    try {
-      const bounds = L.latLngBounds(allItems
-        .filter((i) => isValidLatLng(i.latitude) && isValidLatLng(i.longitude))
-        .map((i) => [i.latitude, i.longitude] as [number, number]));
-      const isDesktop = window.innerWidth >= 1024;
-      const leftPad = isDesktop ? 420 : 40;
-      map.fitBounds(bounds, {
-        paddingTopLeft: [leftPad, 40],
-        paddingBottomRight: [40, 40],
-        maxZoom: 14,
-      });
-    } catch (err) {
-      console.error("[Map] fitBounds error:", err);
-    }
+    const isDesktop = window.innerWidth >= 1024;
+    const delay = isDesktop ? 0 : 300;
+    const timer = setTimeout(() => {
+      try {
+        map.invalidateSize({ pan: false });
+        const bounds = L.latLngBounds(allItems
+          .filter((i) => isValidLatLng(i.latitude) && isValidLatLng(i.longitude))
+          .map((i) => [i.latitude, i.longitude] as [number, number]));
+        const leftPad = isDesktop ? 420 : 40;
+        map.fitBounds(bounds, {
+          paddingTopLeft: [leftPad, 40],
+          paddingBottomRight: [40, 40],
+          maxZoom: 14,
+          animate: false,
+        });
+      } catch (err) {
+        console.error("[Map] fitBounds error:", err);
+      }
+    }, delay);
+    return () => clearTimeout(timer);
   }, [fitBoundsFlag, allItems, map]);
 
   useEffect(() => {
@@ -271,7 +278,15 @@ function MapController({
           const targetPoint = L.CRS.EPSG3857.latLngToPoint(target, 16);
           const offsetPoint = L.point(targetPoint.x - panelOffsetPx, targetPoint.y);
           const offsetCenter = L.CRS.EPSG3857.pointToLatLng(offsetPoint, 16);
+          const overlayPane = map.getPane('overlayPane');
+          if (overlayPane) overlayPane.style.opacity = '0';
+          const gen = ++flyGen.current;
           map.flyTo(offsetCenter, 16, { duration: 1 });
+          map.once('moveend', () => {
+            if (flyGen.current !== gen) return;
+            const p = map.getPane('overlayPane');
+            if (p) p.style.opacity = '';
+          });
         } else {
           // Mobile: no panel offset
           const center = map.getCenter();
@@ -281,12 +296,25 @@ function MapController({
           if (pixelDist < 10) {
             map.setView(target, 16, { animate: false });
           } else {
+            const overlayPane = map.getPane('overlayPane');
+            if (overlayPane) overlayPane.style.opacity = '0';
+            const gen = ++flyGen.current;
             map.flyTo(target, 16, { duration: 1 });
+            map.once('moveend', () => {
+              if (flyGen.current !== gen) return;
+              const p = map.getPane('overlayPane');
+              if (p) p.style.opacity = '';
+            });
           }
         }
       } catch {}
     }, delay);
-    return () => { clearTimeout(timer); };
+    return () => {
+      clearTimeout(timer);
+      // Restore overlay in case cleanup runs mid-flight
+      const p = map.getPane('overlayPane');
+      if (p) p.style.opacity = '';
+    };
   }, [selectedItemId, allItems, map]);
 
   useEffect(() => {
@@ -605,6 +633,16 @@ function ItineraryMarker({
   );
 }
 
+function haversineDistance(a: [number, number], b: [number, number]): number {
+  const R = 6371000;
+  const dLat = (b[0] - a[0]) * Math.PI / 180;
+  const dLng = (b[1] - a[1]) * Math.PI / 180;
+  const sdl = Math.sin(dLat / 2);
+  const sdlg = Math.sin(dLng / 2);
+  const a2 = sdl * sdl + Math.cos(a[0] * Math.PI / 180) * Math.cos(b[0] * Math.PI / 180) * sdlg * sdlg;
+  return R * 2 * Math.atan2(Math.sqrt(a2), Math.sqrt(1 - a2));
+}
+
 export function ItineraryMap() {
   const { days, selectedItemId, hoveredItemId, selectItem, hoverItem, theme, toggleTheme, activeDayFilter, setDayFilter } = useItineraryStore();
   const [fitBoundsFlag, setFitBoundsFlag] = useState(0);
@@ -612,6 +650,8 @@ export function ItineraryMap() {
   const [userLocationFocusRequest, setUserLocationFocusRequest] = useState(0);
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [isLocating, setIsLocating] = useState(false);
+  const [routeCoords, setRouteCoords] = useState<Map<string, [number, number][]>>(new Map());
+  const fetchedRoutesRef = useRef(new Set<string>());
 
   const filteredDays = useMemo(
     () => activeDayFilter !== null ? days.filter((_, i) => i === activeDayFilter) : days,
@@ -624,6 +664,42 @@ export function ItineraryMap() {
   useEffect(() => {
     setFitBoundsFlag((f) => f + 1);
   }, [activeDayFilter]);
+
+  // Fetch OSRM routes between consecutive items where source has google_route_url
+  useEffect(() => {
+    for (const day of filteredDays) {
+      const locItems = day.items
+        .filter((i): i is ItineraryItem & { latitude: number; longitude: number } => hasLocation(i));
+      for (let i = 0; i < locItems.length - 1; i++) {
+        const from = locItems[i];
+        if (!from.google_route_url) continue;
+        const to = locItems[i + 1];
+        const pairKey = `${day.id}-${from.id}-${to.id}`;
+        if (fetchedRoutesRef.current.has(pairKey)) continue;
+
+        fetchedRoutesRef.current.add(pairKey);
+
+        fetch("/api/routing", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ waypoints: [{ lat: from.latitude, lng: from.longitude }, { lat: to.latitude, lng: to.longitude }] }),
+        })
+          .then((r) => r.json())
+          .then((data) => {
+            if (data.coordinates) {
+              setRouteCoords((prev) => {
+                const next = new Map(prev);
+                next.set(pairKey, data.coordinates);
+                return next;
+              });
+            }
+          })
+          .catch(() => {
+            fetchedRoutesRef.current.delete(pairKey);
+          });
+      }
+    }
+  }, [filteredDays]);
 
   const closePopups = useCallback(() => { setPoppedKey(null); selectItem(null); }, [selectItem]);
 
@@ -703,23 +779,60 @@ export function ItineraryMap() {
   }, [allItems, days]);
 
   const routes = useMemo(() => {
-    return filteredDays.filter((d) => d.items.length >= 2).map((day) => {
+    // Build raw route list (per consecutive item pair)
+    const raw: { key: string; positions: [number, number][]; color: string }[] = [];
+    for (const day of filteredDays) {
       const origIndex = days.findIndex((dd) => dd.id === day.id);
-      return {
-        dayIndex: origIndex,
-        positions: day.items
-          .filter((i) => hasLocation(i))
-          .map((item) => [item.latitude, item.longitude] as [number, number]),
-        color: getDayColor(origIndex >= 0 ? origIndex : 0),
-      };
-    });
-  }, [filteredDays, days]);
+      const color = getDayColor(origIndex >= 0 ? origIndex : 0);
+      const locItems = day.items.filter((i) => hasLocation(i));
+      for (let i = 0; i < locItems.length - 1; i++) {
+        const from = locItems[i];
+        const to = locItems[i + 1];
+        const pairKey = `${day.id}-${from.id}-${to.id}`;
+        const fetched = routeCoords.get(pairKey);
+        if (fetched) {
+          raw.push({ key: pairKey, positions: fetched, color });
+        }
+      }
+    }
+
+    // Split each route into overlapping/non-overlapping segments
+    type Seg = { key: string; positions: [number, number][]; color: string; overlapRank: number };
+    const segments: Seg[] = [];
+    for (let ri = 0; ri < raw.length; ri++) {
+      const route = raw[ri];
+      const otherCoords = raw.filter((_, i) => i !== ri).flatMap((r) => r.positions);
+      if (otherCoords.length === 0) {
+        segments.push({ key: route.key, positions: route.positions, color: route.color, overlapRank: -1 });
+        continue;
+      }
+      const isOverlap = route.positions.map((pt) => {
+        for (const oc of otherCoords) {
+          if (haversineDistance(pt, oc) < 50) return true;
+        }
+        return false;
+      });
+      let start = 0;
+      while (start < route.positions.length) {
+        let end = start + 1;
+        while (end < route.positions.length && isOverlap[end] === isOverlap[start]) end++;
+        segments.push({
+          key: `${route.key}-s${start}`,
+          positions: route.positions.slice(start, end + 1),
+          color: route.color,
+          overlapRank: isOverlap[start] ? ri : -1,
+        });
+        start = end;
+      }
+    }
+    return segments;
+  }, [filteredDays, days, routeCoords]);
 
   const tileLayer = useMemo(() => {
     if (theme === "dark") {
       return { key: "dark", url: "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png", attribution: '&copy; <a href="https://openstreetmap.org/">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>' };
     }
-    return { key: "light", url: "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png", attribution: '&copy; <a href="https://openstreetmap.org/">OpenStreetMap</a>' };
+    return { key: "light", url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", attribution: '&copy; <a href="https://openstreetmap.org/">OpenStreetMap</a>' };
   }, [theme]);
 
   useEffect(() => {
@@ -738,6 +851,7 @@ export function ItineraryMap() {
     style.textContent = `
       .leaflet-container { background: ${bg} !important; }
       .leaflet-tile-pane { background: ${bg}; }
+      .leaflet-tile { filter: saturate(0.5); }
     `;
     document.head.appendChild(style);
     return () => { const el = document.getElementById("leaflet-bg-style"); if (el) el.remove(); };
@@ -766,13 +880,22 @@ export function ItineraryMap() {
           userLocationFocusRequest={userLocationFocusRequest}
         />
 
-        {routes.map((route) => (
-          <Polyline
-            key={`route-${route.dayIndex}`}
-            positions={route.positions}
-            pathOptions={{ color: route.color, weight: 2, opacity: 0.35, dashArray: "4 4" }}
-          />
-        ))}
+        {routes.map((seg) => {
+          const colWeight = seg.overlapRank >= 0 ? [8, 5, 2.5][Math.min(seg.overlapRank, 2)] : 4;
+          const outlineWeight = colWeight + 1;
+          return (
+            <React.Fragment key={seg.key}>
+              <Polyline
+                positions={seg.positions}
+                pathOptions={{ color: "#ffffff", weight: outlineWeight, opacity: 0.7 }}
+              />
+              <Polyline
+                positions={seg.positions}
+                pathOptions={{ color: seg.color, weight: colWeight, opacity: 0.9 }}
+              />
+            </React.Fragment>
+          );
+        })}
 
         {locationGroups.map((group) => {
           const item = group.items[0];
