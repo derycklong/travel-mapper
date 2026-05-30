@@ -39,6 +39,9 @@ yarn-error.log*
 *.db-wal
 !data/itinerary.db
 
+# planning
+.planning/
+
 # vercel
 .vercel
 
